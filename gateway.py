@@ -785,6 +785,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 continue
             cand_body = dict(body)
             cand_body["model"] = upstream_model
+            if route["prefix"] == "local/" and isinstance(cand_body.get("messages"), list):
+                cand_body["messages"] = self._merge_systems(cand_body["messages"])
             # Per-route thinking suppression (OpenRouter free reasoning
             # flood): excluding reasoning returns final content + tool
             # calls directly — what an agent loop needs.
@@ -988,6 +990,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._log("dashboard", r["prefix"], model, 502, ms)
                 continue
         return self._json(200, {"ok": False, "attempts": attempts})
+
+    @staticmethod
+    def _merge_systems(messages):
+        """Fold consecutive system messages into one (joined by blank line).
+        Strict templates (Devstral-2, some Ollama quants) 500 on system,
+        system sequences, which agentic clients routinely emit (base prompt
+        + instructions as separate messages). Semantically identical."""
+        merged = []
+        for m in messages:
+            if (m.get("role") == "system" and merged and merged[-1].get("role") == "system"
+                    and isinstance(m.get("content"), str)
+                    and isinstance(merged[-1].get("content"), str)):
+                merged[-1] = dict(merged[-1])
+                merged[-1]["content"] = merged[-1]["content"] + "\n\n" + m["content"]
+            else:
+                merged.append(m)
+        return merged
 
     def _post_upstream(self, route, out, timeout_s=300):
         """POST body bytes to the route's upstream, return the response.
