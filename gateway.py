@@ -71,7 +71,8 @@ UI_PAGE = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>llm-gateway — own API</title>
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#e6edf3;--mut:#8b949e;--acc:#d29922;--ok:#3fb950;--bad:#f85149}
+:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#e6edf3;--mut:#8b949e;--acc:#d29922;--ok:#3fb950;--bad:#f85149;--hover:#1c2128;--chip:#0d1117;--link:#d29922}
+[data-theme="light"]{--bg:#f0f0f1;--panel:#ffffff;--border:#c3c4c7;--text:#3c434a;--mut:#646970;--acc:#2271b1;--ok:#008a20;--bad:#d63638;--hover:#f6f7f7;--chip:#f6f7f7;--link:#2271b1}
 *{box-sizing:border-box}
 body{font-size:17px;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);max-width:1080px;margin:0 auto;padding:1.5em 1em 3em}
 header{display:flex;align-items:baseline;gap:.6em;flex-wrap:wrap}
@@ -143,7 +144,7 @@ footer{margin-top:2.5em;color:var(--mut);font-size:.8em}
 <h2>Provider keys</h2><div id="keyforms"></div>
 <div class="tnote">Keys are stored in the 0600 env file on the server, never in git. Only the last 4 characters are ever displayed.</div>
 <h2>Gateway clients</h2><table id="clients"></table>
-<div class="keyrow"><input id="newname" type="text" placeholder="client name"><input id="newrpm" type="number" value="60" style="width:6em" title="req/min"><input id="newdaily" type="number" value="2000" style="width:8em" title="req/day"><button class="act" onclick="addClient()">add client</button></div>
+<div class="keyrow"><input id="newname" type="text" placeholder="client name"><input id="newrpm" type="number" value="60" style="width:6em" title="req/min"><input id="newdaily" type="number" value="2000" style="width:8em" title="req/day"><input id="newtok" type="number" value="2000000" style="width:9em" title="tokens/day"><button class="act" onclick="addClient()">add client</button></div>
 <div id="newtoken" class="tnote"></div>
 </div>
 <footer>llm-gateway · static surface on GitHub, stateful proxy here · localhost trust domain</footer>
@@ -220,7 +221,7 @@ function renderKeys(){
   ).join('') || '<div class="mut">no keyed routes</div>';
   api('/api/clients', {action:'list'}).then(({j}) => {
     document.getElementById('clients').innerHTML = '<tr><th>client</th><th>rpm</th><th>req/day</th><th>tok/day</th><th>key</th><th></th></tr>' +
-      ((j.clients||[]).map(c => '<tr><td>'+esc(c.name)+'</td><td>'+c.rpm+'</td><td>'+c.daily_requests+'</td><td>'+c.daily_tokens+'</td><td class="mut">'+esc(c.key_hint)+'</td><td><button class="act" onclick="revokeClient(\\''+esc(c.name)+'\\')">revoke</button></td></tr>').join('') || '<tr><td colspan=6 class=mut>none</td></tr>');
+      ((j.clients||[]).map(c => '<tr><td>'+esc(c.name)+'</td><td><input type="number" id="rpm-'+esc(c.name)+'" value="'+c.rpm+'" style="width:5em"></td><td><input type="number" id="req-'+esc(c.name)+'" value="'+c.daily_requests+'" style="width:7em"></td><td><input type="number" id="tok-'+esc(c.name)+'" value="'+c.daily_tokens+'" style="width:8em"></td><td class="mut">'+esc(c.key_hint)+'</td><td><button class="act" onclick="saveClient(\\''+esc(c.name)+'\\')">save</button> <button class="act" onclick="revokeClient(\\''+esc(c.name)+'\\')">revoke</button></td></tr>').join('') || '<tr><td colspan=6 class=mut>none</td></tr>');
   });
 }
 window.saveKey = async (prefix) => {
@@ -230,8 +231,15 @@ window.saveKey = async (prefix) => {
   if(ok) load();
 };
 window.addClient = async () => {
-  const {ok, j} = await api('/api/clients', {action:'add', name: document.getElementById('newname').value, rpm: +document.getElementById('newrpm').value, daily_requests: +document.getElementById('newdaily').value});
+  const {ok, j} = await api('/api/clients', {action:'add', name: document.getElementById('newname').value, rpm: +document.getElementById('newrpm').value, daily_requests: +document.getElementById('newdaily').value, daily_tokens: +document.getElementById('newtok').value});
   if(ok){ document.getElementById('newtoken').innerHTML = 'new client key (shown once): <code>'+esc(j.token)+'</code>'; load(); }
+};
+window.saveClient = async (name) => {
+  const {ok} = await api('/api/clients', {action:'update', name,
+    rpm: +document.getElementById('rpm-'+name).value,
+    daily_requests: +document.getElementById('req-'+name).value,
+    daily_tokens: +document.getElementById('tok-'+name).value});
+  if(ok) load();
 };
 window.revokeClient = async (name) => { if(confirm('revoke '+name+'?')){ await api('/api/clients', {action:'revoke', name}); load(); } };
 load(); setInterval(load, 30000);
@@ -541,6 +549,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._json(500, {"error": f"persist failed: {e}"})
                 return self._json(200, {"ok": True, "token": token,
                                         "note": "shown once — copy it now"})
+            if action == "update":
+                name = req.get("name")
+                targets = [c for c in clients.values() if c.get("name") == name]
+                if not targets:
+                    return self._json(404, {"error": "unknown client"})
+                for field in ("rpm", "daily_requests", "daily_tokens"):
+                    if req.get(field) is not None:
+                        try:
+                            targets[0][field] = int(req[field])
+                        except (TypeError, ValueError):
+                            return self._json(400, {"error": f"bad {field}"})
+                try:
+                    self._save_config()
+                except Exception as e:
+                    return self._json(500, {"error": f"persist failed: {e}"})
+                return self._json(200, {"ok": True})
             if action == "revoke":
                 name = req.get("name")
                 gone = [t for t, c in clients.items() if c.get("name") == name]
@@ -560,7 +584,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                      "daily_tokens": c.get("daily_tokens"),
                      "key_hint": "…" + t[-4:]}
                     for t, c in clients.items()]})
-            return self._json(400, {"error": "action: add | revoke | list"})
+            return self._json(400, {"error": "action: add | update | revoke | list"})
         if self.path == "/api/config":
             try:
                 req = self._read_json()
