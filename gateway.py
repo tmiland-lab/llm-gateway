@@ -71,55 +71,66 @@ UI_PAGE = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>llm-gateway — own API</title>
 <style>
-:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#e6edf3;--mut:#8b949e;--acc:#d29922;--ok:#3fb950;--bad:#f85149;--hover:#1c2128;--chip:#0d1117;--link:#d29922}
-[data-theme="light"]{--bg:#f0f0f1;--panel:#ffffff;--border:#c3c4c7;--text:#3c434a;--mut:#646970;--acc:#2271b1;--ok:#008a20;--bad:#d63638;--hover:#f6f7f7;--chip:#f6f7f7;--link:#2271b1}
 *{box-sizing:border-box}
-body{font-size:17px;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);max-width:1080px;margin:0 auto;padding:1.5em 1em 3em}
-header{display:flex;align-items:baseline;gap:.6em;flex-wrap:wrap}
+body{font-size:17px;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);margin:0;padding:0}
+.layout{display:flex;align-items:stretch;min-height:100vh}
+.side{width:220px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);padding:1.4em 1em;display:flex;flex-direction:column;gap:.9em;position:sticky;top:0;height:100vh}
+.brand{font-size:1.25em;font-weight:700}
+.sub{color:var(--mut);font-size:.82em;margin-top:-.6em}
+#themebtn{align-self:flex-start}
+.tabs{display:flex;flex-direction:column;gap:.3em;margin-top:.4em}
+.tabs button{background:transparent;color:var(--mut);border:1px solid transparent;border-radius:8px;padding:.55em .8em;font-size:.95em;cursor:pointer;text-align:left;border-left:3px solid transparent}
+.tabs button:hover{background:var(--hover);color:var(--text)}
+.tabs button.on{background:var(--hover);color:var(--text);font-weight:650;border-left-color:var(--acc)}
+.sidefoot{margin-top:auto;color:var(--mut);font-size:.75em}
+main{flex:1;min-width:0;max-width:1020px;margin:0 auto;padding:1.5em 1.5em 3em;width:100%}
 h1{font-size:1.6em;margin:0}
-.sub{color:var(--mut);font-size:.9em}
-.live{display:inline-block;width:.55em;height:.55em;border-radius:50%;background:var(--ok);margin-right:.35em;box-shadow:0 0 6px var(--ok)}
 #st{color:var(--mut);font-size:.82em}
-.tabs{display:flex;gap:.4em;margin:1.2em 0 0;flex-wrap:wrap}
-.tabs button{background:var(--panel);color:var(--mut);border:1px solid var(--border);border-radius:8px 8px 0 0;padding:.5em 1em;font-size:.9em;cursor:pointer;border-bottom:none}
-.tabs button.on{background:#1c2128;color:var(--text);font-weight:600}
 .tab{display:none}
-.tab.on{display:block}
+.tab.on{display:block;animation:fadein .18s ease}
+@keyframes fadein{from{opacity:.4}to{opacity:1}}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7em;margin:1.2em 0 .4em}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:.7em .9em}
-.card .v{font-size:1.6em;font-weight:650}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:.8em 1em;transition:border-color .15s}
+.card:hover{border-color:var(--acc)}
+.card .v{font-size:1.6em;font-weight:700}
 .card .l{color:var(--mut);font-size:.78em;margin-top:.15em}
 h2{font-size:1.1em;margin:1.8em 0 .6em;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
-table{border-collapse:collapse;width:100%;font-size:1em;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-td,th{border-bottom:1px solid var(--border);padding:.45em .7em;text-align:left}
+table{border-collapse:collapse;width:100%;font-size:1em;background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+td,th{border-bottom:1px solid var(--border);padding:.5em .75em;text-align:left}
 tr:last-child td{border-bottom:none}
-th{color:var(--mut);font-weight:600;font-size:.8em;text-transform:uppercase;letter-spacing:.04em}
-tr:hover td{background:#1c2128}
+th{color:var(--mut);font-weight:600;font-size:.78em;text-transform:uppercase;letter-spacing:.05em;background:var(--hover)}
+tr:hover td{background:var(--hover)}
+.tab{overflow-x:auto}
 .ok{color:var(--ok)}.bad{color:var(--bad)}.mut{color:var(--mut)}
-.pill{display:inline-block;padding:.1em .55em;border-radius:99px;font-size:.8em;font-weight:600}
+.live{display:inline-block;width:.55em;height:.55em;border-radius:50%;background:var(--ok);margin-right:.4em;box-shadow:0 0 6px var(--ok);animation:pulse 2.4s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.pill{display:inline-block;padding:.15em .6em;border-radius:99px;font-size:.8em;font-weight:600}
 .pill.ok{background:rgba(63,185,80,.14)}
 .pill.bad{background:rgba(248,81,73,.14)}
-code{background:#0d1117;border:1px solid var(--border);padding:.1em .4em;border-radius:6px;font-size:.95em}
-input[type=checkbox]{accent-color:var(--acc);width:1em;height:1em;cursor:pointer}
-input[type=text],input[type=password],input[type=number]{background:#0d1117;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.4em .6em;font-size:.88em}
-button.act{background:#1c2128;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.45em 1em;font-size:.95em;cursor:pointer}
+code{background:var(--chip);border:1px solid var(--border);padding:.15em .45em;border-radius:6px;font-size:.95em}
+input[type=checkbox]{accent-color:var(--acc);width:1.05em;height:1.05em;cursor:pointer}
+input[type=text],input[type=password],input[type=number]{background:var(--chip);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:.45em .65em;font-size:.95em}
+input:focus{outline:2px solid var(--acc);outline-offset:-1px;border-color:var(--acc)}
+button.act{background:var(--hover);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.45em 1em;font-size:.95em;cursor:pointer;transition:border-color .15s}
 button.act:hover{border-color:var(--acc)}
 button.act:disabled{opacity:.5;cursor:wait}
-.search{width:100%;margin:.4em 0 .2em}
-.chain{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:.7em .9em;margin:.5em 0;font-size:1em}
+.search{width:100%;margin:.4em 0 .6em}
+.chain{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:.8em 1em;margin:.5em 0;font-size:1em}
 .chain .arrow{color:var(--acc);font-weight:700}
-.tnote{font-size:.8em;color:var(--mut);margin-top:.4em}
-.keyrow{display:flex;gap:.5em;align-items:center;flex-wrap:wrap;margin:.4em 0}
+.tnote{font-size:.82em;color:var(--mut);margin-top:.5em}
+.keyrow{display:flex;gap:.5em;align-items:center;flex-wrap:wrap;margin:.5em 0}
 footer{margin-top:2.5em;color:var(--mut);font-size:.8em}
+@media (max-width:720px){.layout{flex-direction:column}.side{width:auto;height:auto;position:static;border-right:none;border-bottom:1px solid var(--border);flex-direction:column}.tabs{flex-direction:row;flex-wrap:wrap}.tabs button{border-left:none;border-bottom:3px solid transparent}.tabs button.on{border-bottom-color:var(--acc)}}
 </style></head><body>
-<header><h1><span class="live"></span>llm-gateway</h1><span class="sub">own API, own limits</span><button class="act" id="themebtn" style="margin-left:auto" onclick="toggleTheme()">light</button></header>
-<p id="st">loading…</p>
+<div class="layout"><aside class="side"><div class="brand"><span class="live"></span>llm-gateway</div><div class="sub">own API, own limits</div><button class="act" id="themebtn" onclick="toggleTheme()">light</button>
 <div class="tabs">
 <button id="t-overview" class="on" onclick="showTab('overview')">Overview</button>
 <button id="t-models" onclick="showTab('models')">Models</button>
 <button id="t-activity" onclick="showTab('activity')">Activity</button>
 <button id="t-keys" onclick="showTab('keys')">Keys</button>
 </div>
+<div class="sidefoot">localhost trust domain</div></aside><main>
+<p id="st">loading…</p>
 <div class="tab on" id="tab-overview">
 <div class="cards">
 <div class="card"><div class="v" id="c-models">–</div><div class="l">models</div></div>
@@ -147,7 +158,7 @@ footer{margin-top:2.5em;color:var(--mut);font-size:.8em}
 <div class="keyrow"><input id="newname" type="text" placeholder="client name"><input id="newrpm" type="number" value="60" style="width:6em" title="req/min"><input id="newdaily" type="number" value="2000" style="width:8em" title="req/day"><input id="newtok" type="number" value="2000000" style="width:9em" title="tokens/day"><button class="act" onclick="addClient()">add client</button></div>
 <div id="newtoken" class="tnote"></div>
 </div>
-<footer>llm-gateway · static surface on GitHub, stateful proxy here · localhost trust domain</footer>
+</main><footer>llm-gateway · static surface on GitHub, stateful proxy here · localhost trust domain</footer>
 <script>
 let S = null;
 function showTab(n){
@@ -247,9 +258,9 @@ window.toggleTheme = () => applyTheme(document.documentElement.getAttribute('dat
 let savedTheme = 'dark'; try{ savedTheme = localStorage.getItem('gw-theme') || 'dark'; }catch(e){}
 applyTheme(savedTheme);
 load(); setInterval(load, 30000);
-</script></body></html>
 
 """
+
 
 
 
