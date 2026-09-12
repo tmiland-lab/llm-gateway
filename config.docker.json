@@ -57,6 +57,19 @@
         "gemini-2.5-flash",
         "gemini-2.5-pro"
       ]
+    },
+    {
+      "name": "digitalocean",
+      "prefix": "do/",
+      "base": "https://inference.do-ai.run/v1",
+      "api_key_env": "DO_API_KEY",
+      "models": [
+        "openai-gpt-oss-120b",
+        "kimi-k2.6",
+        "kimi-k3",
+        "glm-5.3",
+        "deepseek-v4-pro"
+      ]
     }
   ]
 }
