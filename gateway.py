@@ -733,6 +733,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             return self._json(400, {"error": "invalid JSON body"})
         model = body.get("model", "")
+        try:
+            shapes = [(m.get("role"), type(m.get("content")).__name__,
+                       len(m.get("content")) if isinstance(m.get("content"), list) else len(str(m.get("content") or "")))
+                      for m in (body.get("messages") or [])]
+            sys.stderr.write("[req] %s shapes=%s\n" % (model, shapes))
+        except Exception:
+            pass
         # NOTE: routing happens in the mirror/candidate block below (which
         # also owns the 402/404 answers); nothing may return early here.
         if body.get("stream") and "stream_options" not in body:
