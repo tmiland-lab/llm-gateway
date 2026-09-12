@@ -220,8 +220,8 @@ function renderKeys(){
     ' <input type="password" id="k-'+esc(x.prefix)+'" placeholder="paste new key"><button class="act" onclick="saveKey(\\''+esc(x.prefix)+'\\')">save</button></div>'
   ).join('') || '<div class="mut">no keyed routes</div>';
   api('/api/clients', {action:'list'}).then(({j}) => {
-    document.getElementById('clients').innerHTML = '<tr><th>client</th><th>rpm</th><th>req/day</th><th>tok/day</th><th>key</th><th></th></tr>' +
-      ((j.clients||[]).map(c => '<tr><td>'+esc(c.name)+'</td><td><input type="number" id="rpm-'+esc(c.name)+'" value="'+c.rpm+'" style="width:5em"></td><td><input type="number" id="req-'+esc(c.name)+'" value="'+c.daily_requests+'" style="width:7em"></td><td><input type="number" id="tok-'+esc(c.name)+'" value="'+c.daily_tokens+'" style="width:8em"></td><td class="mut">'+esc(c.key_hint)+'</td><td><button class="act" onclick="saveClient(\\''+esc(c.name)+'\\')">save</button> <button class="act" onclick="revokeClient(\\''+esc(c.name)+'\\')">revoke</button></td></tr>').join('') || '<tr><td colspan=6 class=mut>none</td></tr>');
+    document.getElementById('clients').innerHTML = '<tr><th>client</th><th>rpm</th><th>req/day (used)</th><th>tok/day (used)</th><th>spent $</th><th>key</th><th></th></tr>' +
+      ((j.clients||[]).map(c => '<tr><td>'+esc(c.name)+'</td><td><input type="number" id="rpm-'+esc(c.name)+'" value="'+c.rpm+'" style="width:5em"></td><td><input type="number" id="req-'+esc(c.name)+'" value="'+c.daily_requests+'" style="width:7em" title="used today: '+c.used_req+'"></td><td><input type="number" id="tok-'+esc(c.name)+'" value="'+c.daily_tokens+'" style="width:8em" title="used today: '+c.used_tok+'"></td><td>$'+Number(c.spent_usd).toFixed(4)+'</td><td class="mut">'+esc(c.key_hint)+'</td><td><button class="act" onclick="saveClient(\\''+esc(c.name)+'\\')">save</button> <button class="act" onclick="revokeClient(\\''+esc(c.name)+'\\')">revoke</button></td></tr>').join('') || '<tr><td colspan=7 class=mut>none</td></tr>');
   });
 }
 window.saveKey = async (prefix) => {
@@ -582,11 +582,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self._json(500, {"error": f"persist failed: {e}"})
                 return self._json(200, {"ok": True})
             if action == "list":
+                spent = {}
+                for row in self._today_spend():
+                    a = spent.setdefault(row["client"], {"tok": 0, "usd": 0.0, "req": 0})
+                    a["tok"] += row["in_tokens"] + row["out_tokens"]
+                    a["usd"] = round(a["usd"] + row["est_usd"], 6)
+                    a["req"] += row["requests"]
                 return self._json(200, {"clients": [
                     {"name": c.get("name"), "rpm": c.get("rpm"),
                      "daily_requests": c.get("daily_requests"),
                      "daily_tokens": c.get("daily_tokens"),
-                     "key_hint": "…" + t[-4:]}
+                     "key_hint": "…" + t[-4:],
+                     "used_req": spent.get(c.get("name"), {}).get("req", 0),
+                     "used_tok": spent.get(c.get("name"), {}).get("tok", 0),
+                     "spent_usd": spent.get(c.get("name"), {}).get("usd", 0.0)}
                     for t, c in clients.items()]})
             return self._json(400, {"error": "action: add | update | revoke | list"})
         if self.path == "/api/config":
