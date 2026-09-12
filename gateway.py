@@ -412,6 +412,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             status, payload = candidates[0][2]
             return self._json(status, json.loads(payload.decode()))
 
+        # Cheapest first: free routes sort to the front automatically;
+        # config order breaks price ties. Quota failover unchanged
+        # (429/5xx → next cheapest). Paid routes never join mirror
+        # groups uninvited — free→paid escalation would be surprise spend.
+        def _cost(c):
+            r, um, _ = c
+            p = self._price_for(r["prefix"], um)
+            return p["in"] + p["out"]
+        candidates = sorted(candidates, key=_cost)
+
         last_fail = None
         for route, upstream_model, prefail in candidates:
             if prefail is not None:
