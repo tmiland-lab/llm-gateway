@@ -24,7 +24,8 @@
         "llama-3.3-70b-versatile",
         "openai/gpt-oss-120b",
         "moonshotai/kimi-k2-instruct"
-      ]
+      ],
+      "burst": true
     },
     {
       "name": "cerebras",
@@ -35,7 +36,8 @@
         "gpt-oss-120b",
         "qwen-3.8-27b",
         "gemma-4-31b"
-      ]
+      ],
+      "burst": true
     },
     {
       "name": "openrouter",
@@ -50,7 +52,8 @@
         "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
         "google/gemma-4-31b-it:free"
       ],
-      "drop_reasoning": true
+      "drop_reasoning": true,
+      "burst": true
     },
     {
       "name": "gemini",
@@ -59,7 +62,8 @@
       "api_key_env": "GEMINI_API_KEY",
       "models": [
         "gemini-3.6-flash"
-      ]
+      ],
+      "burst": true
     },
     {
       "name": "digitalocean",
@@ -72,7 +76,8 @@
         "kimi-k3",
         "glm-5.3",
         "deepseek-v4-pro"
-      ]
+      ],
+      "burst": true
     }
   ]
 }

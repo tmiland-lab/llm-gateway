@@ -291,7 +291,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                          body=out, headers=headers)
             resp = conn.getresponse()
             status = resp.status
-            if body.get("stream"):
+            if body.get("stream") and route.get("burst"):
+                self._burst(resp, body, route, model, name, t0)
+            elif body.get("stream"):
                 self.send_response(status)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
@@ -325,6 +327,118 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json(502, {"error": f"upstream unreachable: {e}"})
             except BrokenPipeError:
                 pass
+
+    def _burst(self, resp, body, route, model, client_name, t0):
+        """Burst mode for flaky free-tier streams: consume the whole upstream
+        SSE response, then replay the complete answer to the client as one
+        fast burst. Kills mid-stream stalls and partial tool-call corruption
+        in one move. Local/fast routes keep the live relay (progress matters
+        more than robustness there)."""
+        deadline = t0 + 280
+        text_parts = []
+        tools = {}
+        finish = None
+        first = None
+        # Provider extensions (e.g. Google thought_signature for thinking
+        # models) must survive reassembly: opencode sends them back on the
+        # next turn, and upstream 400s when they're missing. Shallow-merge,
+        # latest wins.
+        extra_content = {}
+        try:
+            if resp.status != 200:
+                payload = resp.read()
+                self.send_response(resp.status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                self._log(client_name, route["prefix"], model, resp.status,
+                          int((time.time() - t0) * 1000))
+                return
+            while True:
+                if time.time() > deadline:
+                    raise TimeoutError("upstream too slow (>280s)")
+                line = resp.readline(1048576)
+                if not line:
+                    break
+                s = line.decode("utf-8", "replace").strip()
+                if s == "data: [DONE]":
+                    break
+                if not s.startswith("data: "):
+                    continue
+                try:
+                    d = json.loads(s[6:])
+                except Exception:
+                    continue
+                if first is None and isinstance(d, dict) and ("id" in d or "created" in d):
+                    first = d
+                ch = (d.get("choices") or [{}])[0]
+                delta = ch.get("delta") or {}
+                if isinstance(delta.get("content"), str):
+                    text_parts.append(delta["content"])
+                ec = delta.get("extra_content") or ch.get("extra_content") or d.get("extra_content")
+                if isinstance(ec, dict):
+                    extra_content.update(ec)
+                for tc in delta.get("tool_calls") or []:
+                    i = tc.get("index", 0)
+                    e = tools.setdefault(i, {"id": None, "type": "function",
+                                             "name": None, "arguments": ""})
+                    if tc.get("id"):
+                        e["id"] = tc["id"]
+                    if tc.get("type"):
+                        e["type"] = tc["type"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        e["name"] = fn["name"]
+                    if isinstance(fn.get("arguments"), str):
+                        e["arguments"] += fn["arguments"]
+                if ch.get("finish_reason"):
+                    finish = ch["finish_reason"]
+        except Exception as e:
+            self._log(client_name, route.get("prefix", "?"), model, 504,
+                      int((time.time() - t0) * 1000))
+            try:
+                self._json(504, {"error": f"upstream stalled/failed: {e}"})
+            except BrokenPipeError:
+                pass
+            return
+
+        msg_id = (first or {}).get("id", "chatcmpl-gw-%d" % int(time.time()))
+        created = (first or {}).get("created", int(time.time()))
+
+        def emit(delta, finish_reason=None):
+            chunk = {
+                "id": msg_id, "object": "chat.completion.chunk",
+                "created": created, "model": body["model"],
+                "choices": [{"index": 0, "delta": delta,
+                             "finish_reason": finish_reason}],
+            }
+            if extra_content:
+                chunk["extra_content"] = extra_content
+            return ("data: " + json.dumps(chunk) + "\n\n").encode()
+
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            text = "".join(text_parts)
+            if text:
+                self.wfile.write(emit({"role": "assistant", "content": text}))
+            for i in sorted(tools):
+                e = tools[i]
+                self.wfile.write(emit({"tool_calls": [{
+                    "index": i, "id": e["id"], "type": e["type"],
+                    "function": {"name": e["name"],
+                                 "arguments": e["arguments"]}}]}))
+            self.wfile.write(emit({}, finish or "stop"))
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        self._log(client_name, route["prefix"], model, 200,
+                  int((time.time() - t0) * 1000))
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[%s] %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
