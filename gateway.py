@@ -64,6 +64,10 @@ def db():
             conn.execute(f"ALTER TABLE hits ADD COLUMN {col}")
         except Exception:
             pass
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS bench("
+        "ts INTEGER, model TEXT, task TEXT, ok INTEGER, ms INTEGER, note TEXT)"
+    )
     return conn
 
 
@@ -130,6 +134,7 @@ footer{margin-top:2.5em;color:var(--mut);font-size:.8em}
 <button id="t-models" onclick="showTab('models')">Models</button>
 <button id="t-activity" onclick="showTab('activity')">Activity</button>
 <button id="t-keys" onclick="showTab('keys')">Keys</button>
+<button id="t-arena" onclick="showTab('arena')">Arena</button>
 </div>
 <div class="sidefoot">localhost trust domain</div></aside><main>
 <p id="st">loading…</p>
@@ -152,6 +157,14 @@ footer{margin-top:2.5em;color:var(--mut);font-size:.8em}
 <div class="tab" id="tab-activity">
 <h2>Usage today</h2><table id="usage"></table>
 <h2>Recent requests</h2><table id="recent"></table>
+</div>
+<div class="tab" id="tab-arena">
+<h2>Best bang for the buck</h2>
+<div class="tnote">Runs the task on each ticked model (sequentially, free-tier friendly) and ranks by pass, then cost, then speed. Results persist below.</div>
+<div class="keyrow"><select id="arena-task"><option value="exact">exact reply</option><option value="code">write code</option><option value="reason">reasoning</option></select><button class="act" id="arena-run" onclick="runArena()">run arena</button></div>
+<div id="arena-models" class="tnote"></div>
+<h2>Last run</h2><table id="arena-results"></table>
+<h2>History</h2><table id="arena-history"></table>
 </div>
 <div class="tab" id="tab-keys">
 <h2>Provider keys</h2><div id="keyforms"></div>
@@ -192,6 +205,7 @@ async function load(){
   document.getElementById('recent').innerHTML = '<tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr>' +
     (s.recent.map(x => '<tr><td>'+new Date(x.at*1000).toLocaleTimeString()+'</td><td>'+esc(x.client)+'</td><td><code>'+esc(x.model)+'</code></td><td class="'+(x.status===200?'ok':'bad')+'">'+x.status+'</td><td>'+x.ms+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
   renderKeys();
+  renderArena();
 }
 function renderModels(){
   if(!S) return;
@@ -255,6 +269,27 @@ window.saveClient = async (name) => {
   if(ok) load();
 };
 window.revokeClient = async (name) => { if(confirm('revoke '+name+'?')){ await api('/api/clients', {action:'revoke', name}); load(); } };
+function renderArena(){
+  const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  document.getElementById('arena-models').innerHTML = S.models.map(x =>
+    '<label style="display:inline-block;margin:.15em .6em .15em 0"><input type="checkbox" class="amodel" value="'+esc(x.id)+'" checked> <code>'+esc(x.id)+'</code></label>').join('');
+  api('/api/bench', {action:'history'}).then(({j}) => {
+    document.getElementById('arena-history').innerHTML = '<tr><th>time</th><th>model</th><th>task</th><th>pass</th><th>ms</th><th>note</th></tr>' +
+      ((j.history||[]).map(h => '<tr><td>'+new Date(h.at*1000).toLocaleTimeString()+'</td><td><code>'+esc(h.model)+'</code></td><td>'+esc(h.task)+'</td><td class="'+(h.ok?'ok':'bad')+'">'+(h.ok?'✓':'✗')+'</td><td>'+h.ms+'</td><td class="mut">'+esc(h.note||'')+'</td></tr>').join('') || '<tr><td colspan=6 class=mut>no runs yet</td></tr>');
+  });
+}
+window.runArena = async () => {
+  const btn = document.getElementById('arena-run');
+  btn.disabled = true; btn.textContent = 'running…';
+  const models = [...document.querySelectorAll('.amodel:checked')].map(e => e.value);
+  const {ok, j} = await api('/api/bench', {models, task: document.getElementById('arena-task').value});
+  if(ok){
+    document.getElementById('arena-results').innerHTML = '<tr><th>#</th><th>model</th><th>pass</th><th>ms</th><th>est $</th><th>via</th><th>text</th></tr>' +
+      j.results.map((r, i) => '<tr><td>'+(i+1)+'</td><td><code>'+r.model+'</code></td><td class="'+(r.pass?'ok':'bad')+'">'+(r.pass?'✓':'✗')+'</td><td>'+(r.ms||'–')+'</td><td>$'+Number(r.est_usd||0).toFixed(6)+'</td><td class="mut">'+((r.via||'').split('/').pop()||'')+'</td><td class="mut">'+r.text+'</td></tr>').join('');
+    renderArena();
+  }
+  btn.disabled = false; btn.textContent = 'run arena';
+};
 function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); try{ localStorage.setItem('gw-theme', t); }catch(e){} const b = document.getElementById('themebtn'); if(b) b.textContent = t === 'light' ? 'dark' : 'light'; }
 window.toggleTheme = () => applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
 let savedTheme = 'dark'; try{ savedTheme = localStorage.getItem('gw-theme') || 'dark'; }catch(e){}
@@ -611,6 +646,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
                      "spent_usd": spent.get(c.get("name"), {}).get("usd", 0.0)}
                     for t, c in clients.items()]})
             return self._json(400, {"error": "action: add | update | revoke | list"})
+        if self.path == "/api/bench":
+            try:
+                req = self._read_json()
+            except Exception:
+                return self._json(400, {"error": "invalid JSON body"})
+            if req.get("action") == "history":
+                try:
+                    conn = db()
+                    rows = conn.execute(
+                        "SELECT ts, model, task, ok, ms, note FROM bench "
+                        "ORDER BY ts DESC LIMIT 50").fetchall()
+                    conn.close()
+                except Exception:
+                    rows = []
+                return self._json(200, {"history": [
+                    {"at": t, "model": m, "task": ta, "ok": bool(o),
+                     "ms": ms, "note": n} for t, m, ta, o, ms, n in rows]})
+            models = req.get("models") or []
+            task = req.get("task") or "exact"
+            tasks = {
+                "exact": ("reply with exactly: BENCH-OK", 64, "BENCH-OK"),
+                "code": ("Write a python function add(a,b) returning a+b, with two asserts. Reply with exactly: CODE-OK at the end.", 512, "CODE-OK"),
+                "reason": ("A farmer has 17 sheep, all but 9 run away. How many are left? Reply with exactly: SHEEP-9.", 256, "SHEEP-9"),
+            }
+            if task not in tasks:
+                return self._json(400, {"error": "task: exact | code | reason"})
+            prompt, tokens, marker = tasks[task]
+            results = []
+            for m in models[:8]:
+                r = self._bench_model(m, prompt, tokens)
+                passed = r.get("finish") in ("stop", "length") and marker in (r.get("text") or "")
+                self._bench_store(m, task, passed, r.get("ms", 0),
+                                  (r.get("via") or r.get("error", ""))[:120])
+                r["pass"] = passed
+                results.append(r)
+            results.sort(key=lambda r: (not r.get("pass", False), r.get("est_usd", 0), r.get("ms", 0)))
+            return self._json(200, {"task": task, "results": results})
         if self.path == "/api/config":
             try:
                 req = self._read_json()
@@ -803,6 +875,50 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                  (e["price"] or {}).get("out", 0)))
         return plan
 
+    def _bench_model(self, model, prompt, tokens, timeout_s=170):
+        """Arena probe: blocking call through the mirror machinery, graded
+        finish+exact-marker. Result persisted to bench history."""
+        members = self.server.cfg.get("mirrors", {}).get(model, [model])
+        t0 = time.time()
+        for member in members:
+            r, um = self._route_for(member)
+            if r is None or not self._route_enabled(r) or not self._model_enabled(r, member):
+                continue
+            if r.get("api_key_env") and not r.get("api_key"):
+                continue
+            out = json.dumps({"model": um, "max_tokens": tokens, "stream": False,
+                              "messages": [{"role": "user", "content": prompt}]}).encode()
+            try:
+                resp = self._post_upstream(r, out)
+                payload = resp.read()
+                ms = int((time.time() - t0) * 1000)
+                if resp.status != 200:
+                    continue
+                d = json.loads(payload.decode())
+                c = d["choices"][0]
+                it = (d.get("usage") or {}).get("prompt_tokens", 0)
+                ot = (d.get("usage") or {}).get("completion_tokens", 0)
+                p = self._price_for(r["prefix"], um)
+                return {"model": model, "via": member, "ms": ms,
+                        "finish": c.get("finish_reason"),
+                        "text": (c["message"].get("content") or "")[:200],
+                        "in_tok": it, "out_tok": ot,
+                        "est_usd": round(it / 1e6 * p["in"] + ot / 1e6 * p["out"], 6)}
+            except Exception:
+                continue
+        return {"model": model, "via": None,
+                "ms": int((time.time() - t0) * 1000), "error": "all mirrors failed"}
+
+    def _bench_store(self, model, task, ok, ms, note):
+        try:
+            conn = db()
+            conn.execute("INSERT INTO bench VALUES(?,?,?,?,?,?)",
+                         (int(time.time()), model, task, 1 if ok else 0, ms, (note or "")[:200]))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
     def _test_model(self, model):
         """One-click probe from the dashboard: tiny blocking call through
         the normal candidate machinery (first success wins, same failover).
@@ -854,7 +970,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 continue
         return self._json(200, {"ok": False, "attempts": attempts})
 
-    def _post_upstream(self, route, out):
+    def _post_upstream(self, route, out, timeout_s=300):
         """POST body bytes to the route's upstream, return the response.
         Raises on connection failure; caller checks status."""
         parts = urllib.parse.urlsplit(route["base"])
@@ -863,7 +979,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         port = parts.port or (443 if https else 80)
         base_path = parts.path.rstrip("/")
         conn_cls = http.client.HTTPSConnection if https else http.client.HTTPConnection
-        conn = conn_cls(host, port, timeout=300)
+        conn = conn_cls(host, port, timeout=timeout_s)
         headers = {"Content-Type": "application/json"}
         if route.get("api_key"):
             headers["Authorization"] = "Bearer " + route["api_key"]
