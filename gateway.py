@@ -71,6 +71,8 @@ UI_PAGE = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>llm-gateway — own API</title>
 <style>
+:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#e6edf3;--mut:#8b949e;--acc:#d29922;--ok:#3fb950;--bad:#f85149;--hover:#1c2128;--chip:#0d1117;--link:#d29922}
+[data-theme="light"]{--bg:#f0f0f1;--panel:#ffffff;--border:#c3c4c7;--text:#3c434a;--mut:#646970;--acc:#2271b1;--ok:#008a20;--bad:#d63638;--hover:#f6f7f7;--chip:#f6f7f7;--link:#2271b1}
 *{box-sizing:border-box}
 body{font-size:17px;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);margin:0;padding:0}
 .layout{display:flex;align-items:stretch;min-height:100vh}
