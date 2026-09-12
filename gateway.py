@@ -77,8 +77,8 @@ code{background:#161b22;padding:.1em .35em;border-radius:4px;font-size:.9em}
 </style></head><body>
 <h1>llm-gateway <span class="mut">— own API, own limits</span></h1>
 <p id="st" class="mut">loading…</p>
-<h2>Routes</h2><table id="routes"><tr><th>prefix</th><th>name</th><th>status</th></tr></table>
-<h2>Models (<span id="nmodels">0</span>)</h2><table id="models"><tr><th>id</th><th>via</th></tr></table>
+<h2>Routes (toggle to enable/disable)</h2><table id="routes"><tr><th>on</th><th>prefix</th><th>name</th><th>status</th></tr></table>
+<h2>Models (<span id="nmodels">0</span>, toggle to enable/disable)</h2><table id="models"><tr><th>on</th><th>id</th><th>via</th></tr></table>
 <h2>Usage today</h2><table id="usage"><tr><th>client</th><th>requests</th></tr></table>
 <h2>Recent requests</h2><table id="recent"><tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr></table>
 <script>
@@ -86,11 +86,23 @@ async function load(){
   const r = await fetch('/api/status'); const s = await r.json();
   document.getElementById('st').textContent = 'updated ' + new Date().toLocaleTimeString();
   const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  document.getElementById('routes').innerHTML = '<tr><th>prefix</th><th>name</th><th>status</th></tr>' +
-    s.routes.map(x => '<tr><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td class="'+(x.ready?'ok':'bad')+'">'+(x.ready?'ready':'needs '+esc(x.need||''))+'</td></tr>').join('');
+  async function setCfg(body){
+    const r = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+    if(!r.ok) alert('save failed: '+r.status);
+    load();
+  }
+  window.gwToggle = (prefix, on) => setCfg({route: prefix, disabled: !on});
+  window.gwModelToggle = (prefix, id, on) => setCfg({route: prefix, model: id, disabled: !on});
+  const owner = {};
+  s.routes.forEach(x => (x.models||[]).forEach(m => owner[m] = x.prefix));
+  document.getElementById('routes').innerHTML = '<tr><th>on</th><th>prefix</th><th>name</th><th>status</th></tr>' +
+    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\''+esc(x.prefix)+'\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td class="'+(x.ready?'ok':'bad')+'">'+(x.ready?'ready':'needs '+esc(x.need||''))+'</td></tr>').join('');
   document.getElementById('nmodels').textContent = s.models.length;
-  document.getElementById('models').innerHTML = '<tr><th>id</th><th>via</th></tr>' +
-    s.models.map(x => '<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td></tr>').join('');
+  let rows = s.models.map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\''+esc(owner[x.id]||'')+'\',\''+esc(x.id)+'\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td></tr>').join('');
+  s.routes.forEach(x => (x.disabled_models||[]).forEach(m => {
+    rows += '<tr><td><input type="checkbox" onchange="gwModelToggle(\''+esc(x.prefix)+'\',\''+esc(m)+'\',this.checked)"></td><td><code>'+esc(m)+'</code></td><td class="mut">disabled</td></tr>';
+  }));
+  document.getElementById('models').innerHTML = '<tr><th>on</th><th>id</th><th>via</th></tr>' + (rows || '<tr><td colspan=3 class=mut>none</td></tr>');
   document.getElementById('usage').innerHTML = '<tr><th>client</th><th>model</th><th>req</th><th>in/out tok</th><th>est $</th></tr>' +
     (s.usage_today.map(x => '<tr><td>'+esc(x.client)+'</td><td><code>'+esc(x.model||x.route)+'</code></td><td>'+x.requests+'</td><td>'+x.in_tokens+'/'+x.out_tokens+'</td><td>$'+x.est_usd.toFixed(4)+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
   document.getElementById('recent').innerHTML = '<tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr>' +
@@ -217,10 +229,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             conn.close()
             routes = []
             for r in self.server.cfg.get("routes", []):
+                if r["prefix"] == "local/":
+                    mids = ["local/" + m for m in self._ollama_models(r)]
+                else:
+                    mids = [r["prefix"] + m for m in r.get("models", [])]
                 routes.append({
                     "prefix": r["prefix"], "name": r.get("name", "?"),
                     "ready": (not r.get("api_key_env")) or bool(r.get("api_key")),
                     "need": r.get("api_key_env"),
+                    "enabled": self._route_enabled(r),
+                    "models": mids,
+                    "disabled_models": r.get("disabled_models") or [],
                 })
             return self._json(200, {
                 "models": self._virtual_models(),
@@ -264,17 +283,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         "est_usd": round(i / 1e6 * p["in"] + o / 1e6 * p["out"], 6)})
         return out
 
+    def _route_enabled(self, route):
+        return not route.get("disabled")
+
+    def _model_enabled(self, route, virtual_id):
+        return virtual_id not in (route.get("disabled_models") or [])
+
     def _virtual_models(self):
         data = []
         for route in self.server.cfg.get("routes", []):
+            if not self._route_enabled(route):
+                continue
             if route["prefix"] == "local/":
                 for m in self._ollama_models(route):
-                    data.append({"id": "local/" + m, "object": "model",
-                                 "owned_by": "ollama"})
+                    vid = "local/" + m
+                    if self._model_enabled(route, vid):
+                        data.append({"id": vid, "object": "model",
+                                     "owned_by": "ollama"})
             else:
                 for m in route.get("models", []):
-                    data.append({"id": route["prefix"] + m, "object": "model",
-                                 "owned_by": route.get("name", "upstream")})
+                    vid = route["prefix"] + m
+                    if self._model_enabled(route, vid):
+                        data.append({"id": vid, "object": "model",
+                                     "owned_by": route.get("name", "upstream")})
+        for key in self.server.cfg.get("mirrors", {}):
+            data.append({"id": key, "object": "model", "owned_by": "mirror"})
         return data
 
     def _ollama_models(self, route):
@@ -290,7 +323,45 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             return []
 
+    def _save_config(self):
+        """Persist routes/clients/mirrors, never upstream api_key secrets
+        (those live in the env file and only in memory)."""
+        cfg = self.server.cfg
+        clean_routes = []
+        for r in cfg.get("routes", []):
+            c = {k: v for k, v in r.items() if k != "api_key"}
+            clean_routes.append(c)
+        with open(CONFIG_PATH, "w") as f:
+            json.dump({"listen": cfg.get("listen"), "clients": cfg.get("clients"),
+                       "routes": clean_routes, "mirrors": cfg.get("mirrors", {})},
+                      f, indent=2)
+        os.chmod(CONFIG_PATH, 0o600)
+
     def do_POST(self):
+        if self.path == "/api/config":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                req = json.loads((self.rfile.read(length) if length else b"{}").decode())
+            except Exception:
+                return self._json(400, {"error": "invalid JSON body"})
+            route = next((r for r in self.server.cfg.get("routes", [])
+                          if r["prefix"] == req.get("route")), None)
+            if route is None:
+                return self._json(404, {"error": "unknown route"})
+            if "disabled" in req:
+                route["disabled"] = bool(req["disabled"])
+            if "model" in req:
+                dis = set(route.get("disabled_models") or [])
+                if req.get("disabled"):
+                    dis.add(req["model"])
+                else:
+                    dis.discard(req["model"])
+                route["disabled_models"] = sorted(dis)
+            try:
+                self._save_config()
+            except Exception as e:
+                return self._json(500, {"error": f"persist failed: {e}"})
+            return self._json(200, {"ok": True})
         if self.path != "/v1/chat/completions":
             return self._json(404, {"error": "not found"})
         client = self._auth_client()
@@ -319,9 +390,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # failing over on 429/5xx or connection errors. Single models take
         # the same path with one candidate, so behavior is unchanged.
         candidates = []
+        skipped_disabled = False
         for member in self.server.cfg.get("mirrors", {}).get(model, [model]):
             r, um = self._route_for(member)
             if r is None:
+                continue
+            if not self._route_enabled(r) or not self._model_enabled(r, member):
+                skipped_disabled = True
                 continue
             if r.get("api_key_env") and not r.get("api_key"):
                 candidates.append((r, um, (402, json.dumps({"error": (
@@ -330,6 +405,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 continue
             candidates.append((r, um, None))
         if not candidates:
+            if skipped_disabled:
+                return self._json(403, {"error": f"model '{model}' is disabled in the gateway dashboard"})
             return self._json(404, {"error": f"no route for model '{model}'"})
         if len(candidates) == 1 and candidates[0][2] is not None:
             status, payload = candidates[0][2]
