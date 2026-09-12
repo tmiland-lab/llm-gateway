@@ -171,7 +171,7 @@ async function load(){
     return '<div class="chain"><code>'+esc(g)+'</code><br>'+ms+'</div>';
   }).join('') || '<div class="mut">no mirror groups</div>';
   document.getElementById('routes').innerHTML = '<tr><th>on</th><th>prefix</th><th>name</th><th>status</th></tr>' +
-    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\''+esc(x.prefix)+'\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td><span class="pill '+(x.ready?'ok':'bad')+'">'+(x.ready?(x.enabled?'ready':'off'):'needs '+esc(x.need||''))+'</span></td></tr>').join('');
+    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\\''+esc(x.prefix)+'\\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td><span class="pill '+(x.ready?'ok':'bad')+'">'+(x.ready?(x.enabled?'ready':'off'):'needs '+esc(x.need||''))+'</span></td></tr>').join('');
   renderModels();
   document.getElementById('usage').innerHTML = '<tr><th>client</th><th>model</th><th>req</th><th>in/out tok</th><th>est $</th></tr>' +
     (s.usage_today.map(x => '<tr><td>'+esc(x.client)+'</td><td><code>'+esc(x.model||x.route)+'</code></td><td>'+x.requests+'</td><td>'+x.in_tokens+'/'+x.out_tokens+'</td><td>$'+Number(x.est_usd).toFixed(6)+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
@@ -185,10 +185,10 @@ function renderModels(){
   const owner = {};
   S.routes.forEach(x => (x.models||[]).forEach(m => owner[m] = x.prefix));
   const q = (document.getElementById('q').value||'').toLowerCase();
-  let rows = S.models.filter(x => x.id.toLowerCase().includes(q)).map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\''+esc(owner[x.id]||'')+'\',\''+esc(x.id)+'\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td><td><button class="act" onclick="testModel(\''+esc(x.id)+'\',this)">test</button> <span class="tres mut"></span></td></tr>').join('');
+  let rows = S.models.filter(x => x.id.toLowerCase().includes(q)).map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\\''+esc(owner[x.id]||'')+'\\',\\''+esc(x.id)+'\\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td><td><button class="act" onclick="testModel(\\''+esc(x.id)+'\\',this)">test</button> <span class="tres mut"></span></td></tr>').join('');
   S.routes.forEach(x => (x.disabled_models||[]).forEach(m => {
     if(!m.toLowerCase().includes(q)) return;
-    rows += '<tr><td><input type="checkbox" onchange="gwModelToggle(\''+esc(x.prefix)+'\',\''+esc(m)+'\',this.checked)"></td><td><code>'+esc(m)+'</code></td><td class="mut">disabled</td><td></td></tr>';
+    rows += '<tr><td><input type="checkbox" onchange="gwModelToggle(\\''+esc(x.prefix)+'\\',\\''+esc(m)+'\\',this.checked)"></td><td><code>'+esc(m)+'</code></td><td class="mut">disabled</td><td></td></tr>';
   }));
   document.getElementById('models').innerHTML = '<tr><th>on</th><th>id</th><th>via</th><th></th></tr>' + (rows || '<tr><td colspan=4 class=mut>none</td></tr>');
   document.getElementById('nmodels').textContent = S.models.length;
@@ -216,11 +216,11 @@ function renderKeys(){
   document.getElementById('keyforms').innerHTML = S.routes.filter(x => x.need).map(x =>
     '<div class="keyrow"><code>'+esc(x.prefix)+'</code><span class="mut">'+esc(x.need)+'</span>' +
     (x.key_hint ? '<span class="pill ok">set '+esc(x.key_hint)+'</span>' : '<span class="pill bad">missing</span>') +
-    ' <input type="password" id="k-'+esc(x.prefix)+'" placeholder="paste new key"><button class="act" onclick="saveKey(\''+esc(x.prefix)+'\')">save</button></div>'
+    ' <input type="password" id="k-'+esc(x.prefix)+'" placeholder="paste new key"><button class="act" onclick="saveKey(\\''+esc(x.prefix)+'\\')">save</button></div>'
   ).join('') || '<div class="mut">no keyed routes</div>';
   api('/api/clients', {action:'list'}).then(({j}) => {
     document.getElementById('clients').innerHTML = '<tr><th>client</th><th>rpm</th><th>req/day</th><th>tok/day</th><th>key</th><th></th></tr>' +
-      ((j.clients||[]).map(c => '<tr><td>'+esc(c.name)+'</td><td>'+c.rpm+'</td><td>'+c.daily_requests+'</td><td>'+c.daily_tokens+'</td><td class="mut">'+esc(c.key_hint)+'</td><td><button class="act" onclick="revokeClient(\''+esc(c.name)+'\')">revoke</button></td></tr>').join('') || '<tr><td colspan=6 class=mut>none</td></tr>');
+      ((j.clients||[]).map(c => '<tr><td>'+esc(c.name)+'</td><td>'+c.rpm+'</td><td>'+c.daily_requests+'</td><td>'+c.daily_tokens+'</td><td class="mut">'+esc(c.key_hint)+'</td><td><button class="act" onclick="revokeClient(\\''+esc(c.name)+'\\')">revoke</button></td></tr>').join('') || '<tr><td colspan=6 class=mut>none</td></tr>');
   });
 }
 window.saveKey = async (prefix) => {
@@ -238,6 +238,7 @@ load(); setInterval(load, 30000);
 </script></body></html>
 
 """
+
 
 
 
