@@ -298,11 +298,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Connection", "keep-alive")
                 self.end_headers()
                 try:
+                    # SSE: forward line-by-line so the TUI sees tokens
+                    # immediately. read(n) would buffer up to n bytes
+                    # before flushing anything (silence → user aborts).
                     while True:
-                        chunk = resp.read(65536)
-                        if not chunk:
+                        line = resp.readline(65536)
+                        if not line:
                             break
-                        self.wfile.write(chunk)
+                        self.wfile.write(line)
                         self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     pass  # client (user abort) went away; nothing to answer
