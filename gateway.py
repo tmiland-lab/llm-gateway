@@ -392,7 +392,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     self.close_connection = True
             else:
                 payload = resp.read()
-                self.send_response(status)
+                self.send_response(resp.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
