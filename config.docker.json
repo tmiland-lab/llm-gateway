@@ -61,7 +61,8 @@
       "base": "https://generativelanguage.googleapis.com/v1beta/openai/",
       "api_key_env": "GEMINI_API_KEY",
       "models": [
-        "gemini-3.6-flash"
+        "gemini-3.6-flash",
+        "gemini-3.7-flash"
       ],
       "burst": true
     },
