@@ -258,7 +258,7 @@ window.toggleTheme = () => applyTheme(document.documentElement.getAttribute('dat
 let savedTheme = 'dark'; try{ savedTheme = localStorage.getItem('gw-theme') || 'dark'; }catch(e){}
 applyTheme(savedTheme);
 load(); setInterval(load, 30000);
-
+</script></body></html>
 """
 
 
