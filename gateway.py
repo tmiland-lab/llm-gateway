@@ -877,22 +877,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _bench_model(self, model, prompt, tokens, timeout_s=170):
         """Arena probe: blocking call through the mirror machinery, graded
-        finish+exact-marker. Result persisted to bench history."""
+        finish+exact-marker. Result persisted to bench history. Surfaces the
+        last upstream verdict instead of a blanket failure."""
         members = self.server.cfg.get("mirrors", {}).get(model, [model])
         t0 = time.time()
+        last_err = "no candidate"
         for member in members:
             r, um = self._route_for(member)
             if r is None or not self._route_enabled(r) or not self._model_enabled(r, member):
+                last_err = "disabled/no route"
                 continue
             if r.get("api_key_env") and not r.get("api_key"):
+                last_err = f"needs {r['api_key_env']}"
                 continue
             out = json.dumps({"model": um, "max_tokens": tokens, "stream": False,
                               "messages": [{"role": "user", "content": prompt}]}).encode()
             try:
-                resp = self._post_upstream(r, out)
+                resp = self._post_upstream(r, out, timeout_s)
                 payload = resp.read()
                 ms = int((time.time() - t0) * 1000)
                 if resp.status != 200:
+                    try:
+                        em = json.loads(payload.decode()).get("error", {})
+                        last_err = f"HTTP {resp.status}: {str(em.get('message') or em)[:140]}"
+                    except Exception:
+                        last_err = f"HTTP {resp.status}"
                     continue
                 d = json.loads(payload.decode())
                 c = d["choices"][0]
@@ -907,7 +916,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 continue
         return {"model": model, "via": None,
-                "ms": int((time.time() - t0) * 1000), "error": "all mirrors failed"}
+                "ms": int((time.time() - t0) * 1000), "error": last_err}
 
     def _bench_store(self, model, task, ok, ms, note):
         try:
