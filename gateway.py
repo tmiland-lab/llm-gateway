@@ -326,29 +326,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body["stream_options"] = {"include_usage": True}
         out = json.dumps(body).encode()
 
-        parts = urllib.parse.urlsplit(route["base"])
-        https = parts.scheme == "https"
-        host = parts.hostname or "127.0.0.1"
-        port = parts.port or (443 if https else 80)
-        base_path = parts.path.rstrip("/")
         t0 = time.time()
 
-        try:
-            conn_cls = http.client.HTTPSConnection if https else http.client.HTTPConnection
-            conn = conn_cls(host, port, timeout=300)
-            headers = {"Content-Type": "application/json"}
-            if route.get("api_key"):
-                headers["Authorization"] = "Bearer " + route["api_key"]
-            for extra in route.get("headers", {}).items():
-                headers[extra[0]] = extra[1]
-            conn.request("POST", base_path + "/chat/completions",
-                         body=out, headers=headers)
-            resp = conn.getresponse()
-            status = resp.status
+        # Mirror groups (auto/<name>): try each member upstream in order,
+        # failing over on 429/5xx or connection errors. Single models take
+        # the same path with one candidate, so behavior is unchanged.
+        candidates = []
+        for member in self.server.cfg.get("mirrors", {}).get(model, [model]):
+            r, um = self._route_for(member)
+            if r is None:
+                continue
+            if r.get("api_key_env") and not r.get("api_key"):
+                candidates.append((r, um, (402, json.dumps({"error": (
+                    f"route '{r['prefix']}' needs a free provider key: "
+                    f"set {r['api_key_env']} and restart the gateway")}).encode())))
+                continue
+            candidates.append((r, um, None))
+        if not candidates:
+            return self._json(404, {"error": f"no route for model '{model}'"})
+        if len(candidates) == 1 and candidates[0][2] is not None:
+            status, payload = candidates[0][2]
+            return self._json(status, json.loads(payload.decode()))
+
+        last_fail = None
+        for route, upstream_model, prefail in candidates:
+            if prefail is not None:
+                last_fail = (402, prefail)
+                self._log(name, route["prefix"], model, 402,
+                          int((time.time() - t0) * 1000))
+                continue
+            cand_body = dict(body)
+            cand_body["model"] = upstream_model
+            cand_out = json.dumps(cand_body).encode()
+            try:
+                resp = self._post_upstream(route, cand_out)
+            except Exception as e:
+                last_fail = (502, json.dumps({"error": f"upstream unreachable: {e}"}).encode())
+                self._log(name, route["prefix"], model, 502,
+                          int((time.time() - t0) * 1000))
+                continue
+            if resp.status == 429 or resp.status >= 500:
+                payload = resp.read()
+                last_fail = (resp.status, payload)
+                self._log(name, route["prefix"], model, resp.status,
+                          int((time.time() - t0) * 1000))
+                continue
             if body.get("stream") and route.get("burst"):
-                self._burst(resp, body, route, model, name, t0)
+                if self._burst(resp, cand_body, route, model, name, t0):
+                    return
+                last_fail = (504, json.dumps({"error": "upstream stalled/failed"}).encode())
+                continue
             elif body.get("stream"):
-                self.send_response(status)
+                self.send_response(resp.status)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Connection", "keep-alive")
@@ -377,23 +406,49 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(payload)
                 intok = outtok = 0
-                if status == 200:
+                if resp.status == 200:
                     try:
                         intok, outtok = self._usage_of(json.loads(payload.decode()))
                     except Exception:
                         pass
-                self._log(name, route["prefix"], model, status,
+                self._log(name, route["prefix"], model, resp.status,
                           int((time.time() - t0) * 1000), intok, outtok)
                 return
-            self._log(name, route["prefix"], model, status,
+            self._log(name, route["prefix"], model, resp.status,
                       int((time.time() - t0) * 1000))
-        except Exception as e:
-            self._log(name, route.get("prefix", "?"), model, 502,
-                      int((time.time() - t0) * 1000))
+            return
+        # Every candidate failed with 429/5xx/unreachable: forward the last
+        # upstream verdict instead of a generic error.
+        if last_fail is not None:
+            status, payload = last_fail
             try:
-                self._json(502, {"error": f"upstream unreachable: {e}"})
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
             except BrokenPipeError:
                 pass
+            return
+
+    def _post_upstream(self, route, out):
+        """POST body bytes to the route's upstream, return the response.
+        Raises on connection failure; caller checks status."""
+        parts = urllib.parse.urlsplit(route["base"])
+        https = parts.scheme == "https"
+        host = parts.hostname or "127.0.0.1"
+        port = parts.port or (443 if https else 80)
+        base_path = parts.path.rstrip("/")
+        conn_cls = http.client.HTTPSConnection if https else http.client.HTTPConnection
+        conn = conn_cls(host, port, timeout=300)
+        headers = {"Content-Type": "application/json"}
+        if route.get("api_key"):
+            headers["Authorization"] = "Bearer " + route["api_key"]
+        for extra in route.get("headers", {}).items():
+            headers[extra[0]] = extra[1]
+        conn.request("POST", base_path + "/chat/completions",
+                     body=out, headers=headers)
+        return conn.getresponse()
 
     def _burst(self, resp, body, route, model, client_name, t0):
         """Burst mode for flaky free-tier streams: consume the whole upstream
@@ -412,6 +467,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # next turn, and upstream 400s when they're missing. Shallow-merge,
         # latest wins.
         extra_content = {}
+        # Returns True when the client got a response, False when the
+        # caller should fail over to the next mirror (nothing sent).
         try:
             if resp.status != 200:
                 payload = resp.read()
@@ -422,7 +479,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(payload)
                 self._log(client_name, route["prefix"], model, resp.status,
                           int((time.time() - t0) * 1000))
-                return
+                return True
             while True:
                 if time.time() > deadline:
                     raise TimeoutError("upstream too slow (>280s)")
@@ -467,11 +524,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             self._log(client_name, route.get("prefix", "?"), model, 504,
                       int((time.time() - t0) * 1000))
-            try:
-                self._json(504, {"error": f"upstream stalled/failed: {e}"})
-            except BrokenPipeError:
-                pass
-            return
+            return False
 
         msg_id = (first or {}).get("id", "chatcmpl-gw-%d" % int(time.time()))
         created = (first or {}).get("created", int(time.time()))
@@ -511,6 +564,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
         self._log(client_name, route["prefix"], model, 200,
                   int((time.time() - t0) * 1000), in_tok, out_tok)
+        return True
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[%s] %s\n" % (time.strftime("%H:%M:%S"), fmt % args))

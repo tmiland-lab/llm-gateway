@@ -143,5 +143,19 @@
         "out": 0
       }
     }
-  ]
+  ],
+  "mirrors": {
+    "auto/north": [
+      "openrouter/cohere/north-mini-code:free",
+      "kilo/cohere/north-mini-code:free"
+    ],
+    "auto/ultra": [
+      "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "kilo/nvidia/nemotron-3-ultra-550b-a55b:free"
+    ],
+    "auto/big": [
+      "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+      "kilo/nvidia/nemotron-3-super-120b-a12b:free"
+    ]
+  }
 }
