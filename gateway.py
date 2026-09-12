@@ -201,7 +201,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 a["requests"] += row["requests"]
                 a["in_tokens"] += row["in_tokens"]
                 a["out_tokens"] += row["out_tokens"]
-                a["est_usd"] = round(a["est_usd"] + row["est_usd"], 4)
+                a["est_usd"] = round(a["est_usd"] + row["est_usd"], 6)
             return self._json(200, {"today": list(agg.values())})
 
         if self.path == "/v1/models":
@@ -261,7 +261,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             p = self._price_for(ro, m)
             out.append({"client": c, "route": ro, "model": m, "requests": n,
                         "in_tokens": i, "out_tokens": o,
-                        "est_usd": round(i / 1e6 * p["in"] + o / 1e6 * p["out"], 4)})
+                        "est_usd": round(i / 1e6 * p["in"] + o / 1e6 * p["out"], 6)})
         return out
 
     def _virtual_models(self):
