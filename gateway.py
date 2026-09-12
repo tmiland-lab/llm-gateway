@@ -204,35 +204,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 a["est_usd"] = round(a["est_usd"] + row["est_usd"], 4)
             return self._json(200, {"today": list(agg.values())})
 
-    def _price_for(self, route_prefix, model):
-        """Per-model prices (substring match on the model id), falling back
-        to the route default. DO's kimi costs ~16x its 120b — one number
-        per route would lie."""
-        for r in self.server.cfg.get("routes", []):
-            if r["prefix"] != route_prefix:
-                continue
-            for key, p in (r.get("model_prices") or {}).items():
-                if key in (model or ""):
-                    return p
-            return r.get("price_per_mtok") or {"in": 0, "out": 0}
-        return {"in": 0, "out": 0}
-
-    def _today_spend(self):
-        """Per-(client, route, model) token sums with per-model pricing."""
-        now = int(time.time())
-        conn = db()
-        rows = conn.execute(
-            "SELECT client, route, model, COALESCE(SUM(in_tok),0), COALESCE(SUM(out_tok),0), COUNT(*) FROM hits WHERE ts>=? GROUP BY client, route, model",
-            (now - (now % 86400),),
-        ).fetchall()
-        conn.close()
-        out = []
-        for c, ro, m, i, o, n in rows:
-            p = self._price_for(ro, m)
-            out.append({"client": c, "route": ro, "model": m, "requests": n,
-                        "in_tokens": i, "out_tokens": o,
-                        "est_usd": round(i / 1e6 * p["in"] + o / 1e6 * p["out"], 4)})
-        return out
         if self.path == "/v1/models":
             return self._json(200, {"object": "list",
                                     "data": self._virtual_models()})
@@ -262,6 +233,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/ui" or self.path == "/ui/":
             return self._html(200, UI_PAGE)
         return self._json(404, {"error": "not found"})
+
+    def _price_for(self, route_prefix, model):
+        """Per-model prices (substring match on the model id), falling back
+        to the route default. DO's kimi costs ~16x its 120b — one number
+        per route would lie."""
+        for r in self.server.cfg.get("routes", []):
+            if r["prefix"] != route_prefix:
+                continue
+            for key, p in (r.get("model_prices") or {}).items():
+                if key in (model or ""):
+                    return p
+            return r.get("price_per_mtok") or {"in": 0, "out": 0}
+        return {"in": 0, "out": 0}
+
+    def _today_spend(self):
+        """Per-(client, route, model) token sums with per-model pricing."""
+        now = int(time.time())
+        conn = db()
+        rows = conn.execute(
+            "SELECT client, route, model, COALESCE(SUM(in_tok),0), COALESCE(SUM(out_tok),0), COUNT(*) FROM hits WHERE ts>=? GROUP BY client, route, model",
+            (now - (now % 86400),),
+        ).fetchall()
+        conn.close()
+        out = []
+        for c, ro, m, i, o, n in rows:
+            p = self._price_for(ro, m)
+            out.append({"client": c, "route": ro, "model": m, "requests": n,
+                        "in_tokens": i, "out_tokens": o,
+                        "est_usd": round(i / 1e6 * p["in"] + o / 1e6 * p["out"], 4)})
+        return out
 
     def _virtual_models(self):
         data = []
