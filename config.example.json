@@ -78,6 +78,18 @@
         "deepseek-v4-pro"
       ],
       "burst": true
+    },
+    {
+      "name": "kilo",
+      "prefix": "kilo/",
+      "base": "https://api.kilo.ai/api/gateway",
+      "api_key_env": null,
+      "burst": true,
+      "models": [
+        "cohere/north-mini-code:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "nvidia/nemotron-3-super-120b-a12b:free"
+      ]
     }
   ]
 }
