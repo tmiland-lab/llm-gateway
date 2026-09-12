@@ -311,6 +311,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     pass  # client (user abort) went away; nothing to answer
+                finally:
+                    # SSE has no Content-Length: close so clients see EOF
+                    # instead of hanging on keep-alive.
+                    self.close_connection = True
             else:
                 payload = resp.read()
                 self.send_response(status)
@@ -437,6 +441,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
+        finally:
+            self.close_connection = True
         self._log(client_name, route["prefix"], model, 200,
                   int((time.time() - t0) * 1000))
 
