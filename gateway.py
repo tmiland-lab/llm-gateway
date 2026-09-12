@@ -264,6 +264,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 f"route '{route['prefix']}' needs a free provider key: "
                 f"set {route['api_key_env']} and restart the gateway")})
         body["model"] = upstream_model
+        # Fork: thinking models (OpenRouter free reasoning flood) stream
+        # endless reasoning deltas the client never displays, so the user
+        # sees "no answer" until abort. Excluding reasoning returns final
+        # content + tool calls directly — what an agent loop needs.
+        if route.get("drop_reasoning") and "reasoning" not in body:
+            body["reasoning"] = {"exclude": True}
         out = json.dumps(body).encode()
 
         parts = urllib.parse.urlsplit(route["base"])
@@ -291,12 +297,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Connection", "keep-alive")
                 self.end_headers()
-                while True:
-                    chunk = resp.read(65536)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
+                try:
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # client (user abort) went away; nothing to answer
             else:
                 payload = resp.read()
                 self.send_response(status)
