@@ -112,7 +112,7 @@ button.act:disabled{opacity:.5;cursor:wait}
 .keyrow{display:flex;gap:.5em;align-items:center;flex-wrap:wrap;margin:.4em 0}
 footer{margin-top:2.5em;color:var(--mut);font-size:.8em}
 </style></head><body>
-<header><h1><span class="live"></span>llm-gateway</h1><span class="sub">own API, own limits</span></header>
+<header><h1><span class="live"></span>llm-gateway</h1><span class="sub">own API, own limits</span><button class="act" id="themebtn" style="margin-left:auto" onclick="toggleTheme()">light</button></header>
 <p id="st">loading…</p>
 <div class="tabs">
 <button id="t-overview" class="on" onclick="showTab('overview')">Overview</button>
@@ -242,6 +242,10 @@ window.saveClient = async (name) => {
   if(ok) load();
 };
 window.revokeClient = async (name) => { if(confirm('revoke '+name+'?')){ await api('/api/clients', {action:'revoke', name}); load(); } };
+function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); try{ localStorage.setItem('gw-theme', t); }catch(e){} const b = document.getElementById('themebtn'); if(b) b.textContent = t === 'light' ? 'dark' : 'light'; }
+window.toggleTheme = () => applyTheme(document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light');
+let savedTheme = 'dark'; try{ savedTheme = localStorage.getItem('gw-theme') || 'dark'; }catch(e){}
+applyTheme(savedTheme);
 load(); setInterval(load, 30000);
 </script></body></html>
 
