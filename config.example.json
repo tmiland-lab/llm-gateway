@@ -5,7 +5,7 @@
       "name": "tommy",
       "rpm": 60,
       "daily_requests": 2000,
-      "daily_tokens": 2000000
+      "daily_tokens": 10000000
     }
   },
   "routes": [
