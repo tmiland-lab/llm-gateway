@@ -22,6 +22,7 @@ import http.client
 import http.server
 import json
 import os
+import secrets
 import socketserver
 import sqlite3
 import sys
@@ -33,6 +34,9 @@ CONFIG_PATH = os.environ.get("GATEWAY_CONFIG",
                              os.path.expanduser("~/.config/llm-gateway/config.json"))
 DB_PATH = os.environ.get("GATEWAY_DB",
                          os.path.expanduser("~/.local/share/llm-gateway/usage.db"))
+# Upstream provider keys live here (0600), never in config.json or git.
+ENV_PATH = os.environ.get("GATEWAY_ENV",
+                          os.path.expanduser("~/.config/llm-gateway/env"))
 
 
 def load_config():
@@ -265,17 +269,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     mids = ["local/" + m for m in self._ollama_models(r)]
                 else:
                     mids = [r["prefix"] + m for m in r.get("models", [])]
+                key = r.get("api_key") or ""
                 routes.append({
                     "prefix": r["prefix"], "name": r.get("name", "?"),
-                    "ready": (not r.get("api_key_env")) or bool(r.get("api_key")),
+                    "ready": (not r.get("api_key_env")) or bool(key),
                     "need": r.get("api_key_env"),
+                    "key_hint": ("…" + key[-4:]) if key else None,
                     "enabled": self._route_enabled(r),
                     "models": mids,
                     "disabled_models": r.get("disabled_models") or [],
                 })
+            mirrors = {}
+            for group, members in self.server.cfg.get("mirrors", {}).items():
+                mirrors[group] = self._mirror_plan(members)
             return self._json(200, {
                 "models": self._virtual_models(),
                 "routes": routes,
+                "mirrors": mirrors,
                 "usage_today": usage,
                 "recent": [{"at": t, "client": c, "route": ro, "model": m,
                             "status": s, "ms": ms}
@@ -369,11 +379,97 @@ class Handler(http.server.BaseHTTPRequestHandler):
                       f, indent=2)
         os.chmod(CONFIG_PATH, 0o600)
 
+    def _read_json(self):
+        length = int(self.headers.get("Content-Length", 0))
+        return json.loads((self.rfile.read(length) if length else b"{}").decode())
+
+    def _write_env(self, var, value):
+        """Upsert one VAR=value line in the 0600 env file."""
+        lines = []
+        if os.path.exists(ENV_PATH):
+            with open(ENV_PATH) as f:
+                lines = f.read().splitlines()
+        lines = [l for l in lines if not l.startswith(var + "=") and l.strip() != var + "="]
+        if value:
+            lines.append(f"{var}={value}")
+        os.makedirs(os.path.dirname(ENV_PATH), exist_ok=True)
+        with open(ENV_PATH, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        os.chmod(ENV_PATH, 0o600)
+
     def do_POST(self):
+        if self.path == "/api/test":
+            try:
+                req = self._read_json()
+            except Exception:
+                return self._json(400, {"error": "invalid JSON body"})
+            return self._test_model(req.get("model", ""))
+        if self.path == "/api/keys":
+            try:
+                req = self._read_json()
+            except Exception:
+                return self._json(400, {"error": "invalid JSON body"})
+            route = next((r for r in self.server.cfg.get("routes", [])
+                          if r["prefix"] == req.get("route")), None)
+            if route is None or not route.get("api_key_env"):
+                return self._json(404, {"error": "route takes no key"})
+            key = (req.get("key") or "").strip()
+            if not key:
+                return self._json(400, {"error": "empty key"})
+            try:
+                self._write_env(route["api_key_env"], key)
+            except Exception as e:
+                return self._json(500, {"error": f"env write failed: {e}"})
+            route["api_key"] = key
+            return self._json(200, {"ok": True, "hint": "…" + key[-4:]})
+        if self.path == "/api/clients":
+            try:
+                req = self._read_json()
+            except Exception:
+                return self._json(400, {"error": "invalid JSON body"})
+            clients = self.server.cfg.setdefault("clients", {})
+            action = req.get("action")
+            if action == "add":
+                name = (req.get("name") or "").strip()
+                if not name:
+                    return self._json(400, {"error": "name required"})
+                if any(c.get("name") == name for c in clients.values()):
+                    return self._json(400, {"error": "name taken"})
+                token = secrets.token_hex(32)
+                clients[token] = {"name": name,
+                                  "rpm": int(req.get("rpm") or 60),
+                                  "daily_requests": int(req.get("daily_requests") or 1000),
+                                  "daily_tokens": int(req.get("daily_tokens") or 2000000)}
+                try:
+                    self._save_config()
+                except Exception as e:
+                    del clients[token]
+                    return self._json(500, {"error": f"persist failed: {e}"})
+                return self._json(200, {"ok": True, "token": token,
+                                        "note": "shown once — copy it now"})
+            if action == "revoke":
+                name = req.get("name")
+                gone = [t for t, c in clients.items() if c.get("name") == name]
+                if not gone:
+                    return self._json(404, {"error": "unknown client"})
+                for t in gone:
+                    del clients[t]
+                try:
+                    self._save_config()
+                except Exception as e:
+                    return self._json(500, {"error": f"persist failed: {e}"})
+                return self._json(200, {"ok": True})
+            if action == "list":
+                return self._json(200, {"clients": [
+                    {"name": c.get("name"), "rpm": c.get("rpm"),
+                     "daily_requests": c.get("daily_requests"),
+                     "daily_tokens": c.get("daily_tokens"),
+                     "key_hint": "…" + t[-4:]}
+                    for t, c in clients.items()]})
+            return self._json(400, {"error": "action: add | revoke | list"})
         if self.path == "/api/config":
             try:
-                length = int(self.headers.get("Content-Length", 0))
-                req = json.loads((self.rfile.read(length) if length else b"{}").decode())
+                req = self._read_json()
             except Exception:
                 return self._json(400, {"error": "invalid JSON body"})
             route = next((r for r in self.server.cfg.get("routes", [])
@@ -541,6 +637,78 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except BrokenPipeError:
                 pass
             return
+
+    def _mirror_plan(self, members):
+        """Ordered failover plan for a mirror group: cheapest first, with
+        per-member price and reachability. Powers the dashboard display and
+        documents the order the chat path tries."""
+        plan = []
+        for member in members:
+            r, um = self._route_for(member)
+            if r is None:
+                plan.append({"model": member, "route": None, "price": None,
+                             "ready": False, "why": "no route"})
+                continue
+            p = self._price_for(r["prefix"], um)
+            ready = (not r.get("api_key_env")) or bool(r.get("api_key"))
+            enabled = self._route_enabled(r) and self._model_enabled(r, member)
+            plan.append({"model": member, "route": r["prefix"],
+                         "price": p, "ready": ready, "enabled": enabled,
+                         "why": None if (ready and enabled) else "disabled" if enabled else "needs key"})
+        plan.sort(key=lambda e: ((e["price"] or {}).get("in", 0) +
+                                 (e["price"] or {}).get("out", 0)))
+        return plan
+
+    def _test_model(self, model):
+        """One-click probe from the dashboard: tiny blocking call through
+        the normal candidate machinery (first success wins, same failover).
+        Logged as client 'dashboard' so tests show up in spend honestly."""
+        members = self.server.cfg.get("mirrors", {}).get(model, [model])
+        attempts = []
+        t0 = time.time()
+        for member in members:
+            r, um = self._route_for(member)
+            if r is None:
+                attempts.append({"model": member, "ok": False, "error": "no route"})
+                continue
+            if not self._route_enabled(r) or not self._model_enabled(r, member):
+                attempts.append({"model": member, "ok": False, "error": "disabled"})
+                continue
+            if r.get("api_key_env") and not r.get("api_key"):
+                attempts.append({"model": member, "ok": False,
+                                 "error": f"needs {r['api_key_env']}"})
+                continue
+            out = json.dumps({"model": um, "max_tokens": 16, "stream": False,
+                              "messages": [{"role": "user",
+                                            "content": "reply with exactly: GW-TEST"}]}).encode()
+            a0 = time.time()
+            try:
+                resp = self._post_upstream(r, out)
+                payload = resp.read()
+                ms = int((time.time() - a0) * 1000)
+                if resp.status != 200:
+                    attempts.append({"model": member, "ok": False,
+                                     "error": f"HTTP {resp.status}",
+                                     "detail": payload.decode()[:160], "ms": ms})
+                    self._log("dashboard", r["prefix"], model, resp.status, ms)
+                    continue
+                d = json.loads(payload.decode())
+                c = d["choices"][0]
+                attempts.append({"model": member, "ok": True, "ms": ms,
+                                 "finish": c.get("finish_reason"),
+                                 "text": (c["message"].get("content") or "")[:80]})
+                self._log("dashboard", r["prefix"], model, 200, ms,
+                          *self._usage_of(d))
+                return self._json(200, {"ok": True, "winner": member,
+                                        "total_ms": int((time.time() - t0) * 1000),
+                                        "attempts": attempts})
+            except Exception as e:
+                ms = int((time.time() - a0) * 1000)
+                attempts.append({"model": member, "ok": False,
+                                 "error": f"unreachable: {e}", "ms": ms})
+                self._log("dashboard", r["prefix"], model, 502, ms)
+                continue
+        return self._json(200, {"ok": False, "attempts": attempts})
 
     def _post_upstream(self, route, out):
         """POST body bytes to the route's upstream, return the response.
