@@ -158,6 +158,37 @@
     "auto/big": [
       "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
       "kilo/nvidia/nemotron-3-super-120b-a12b:free"
+    ],
+    "auto/code": [
+      "openrouter/cohere/north-mini-code:free",
+      "kilo/cohere/north-mini-code:free",
+      "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "kilo/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+      "kilo/nvidia/nemotron-3-super-120b-a12b:free"
+    ],
+    "auto/write": [
+      "gemini/gemini-3.7-flash",
+      "gemini/gemini-3.6-flash",
+      "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "kilo/nvidia/nemotron-3-ultra-550b-a55b:free"
+    ],
+    "auto/smart": [
+      "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+      "kilo/nvidia/nemotron-3-super-120b-a12b:free",
+      "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "kilo/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "gemini/gemini-3.7-flash"
+    ],
+    "auto/fast": [
+      "openrouter/cohere/north-mini-code:free",
+      "kilo/cohere/north-mini-code:free",
+      "gemini/gemini-3.6-flash"
+    ],
+    "auto/pro": [
+      "do/glm-5.3",
+      "do/kimi-k3",
+      "do/deepseek-v4-pro"
     ]
   }
 }
