@@ -96,11 +96,11 @@ async function load(){
   const owner = {};
   s.routes.forEach(x => (x.models||[]).forEach(m => owner[m] = x.prefix));
   document.getElementById('routes').innerHTML = '<tr><th>on</th><th>prefix</th><th>name</th><th>status</th></tr>' +
-    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\''+esc(x.prefix)+'\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td class="'+(x.ready?'ok':'bad')+'">'+(x.ready?'ready':'needs '+esc(x.need||''))+'</td></tr>').join('');
+    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\\''+esc(x.prefix)+'\\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td class="'+(x.ready?'ok':'bad')+'">'+(x.ready?'ready':'needs '+esc(x.need||''))+'</td></tr>').join('');
   document.getElementById('nmodels').textContent = s.models.length;
-  let rows = s.models.map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\''+esc(owner[x.id]||'')+'\',\''+esc(x.id)+'\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td></tr>').join('');
+  let rows = s.models.map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\\''+esc(owner[x.id]||'')+'\\',\\''+esc(x.id)+'\\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td></tr>').join('');
   s.routes.forEach(x => (x.disabled_models||[]).forEach(m => {
-    rows += '<tr><td><input type="checkbox" onchange="gwModelToggle(\''+esc(x.prefix)+'\',\''+esc(m)+'\',this.checked)"></td><td><code>'+esc(m)+'</code></td><td class="mut">disabled</td></tr>';
+    rows += '<tr><td><input type="checkbox" onchange="gwModelToggle(\\''+esc(x.prefix)+'\\',\\''+esc(m)+'\\',this.checked)"></td><td><code>'+esc(m)+'</code></td><td class="mut">disabled</td></tr>';
   }));
   document.getElementById('models').innerHTML = '<tr><th>on</th><th>id</th><th>via</th></tr>' + (rows || '<tr><td colspan=3 class=mut>none</td></tr>');
   document.getElementById('usage').innerHTML = '<tr><th>client</th><th>model</th><th>req</th><th>in/out tok</th><th>est $</th></tr>' +
