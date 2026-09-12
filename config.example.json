@@ -20,14 +20,22 @@
       "prefix": "groq/",
       "base": "https://api.groq.com/openai/v1",
       "api_key_env": "GROQ_API_KEY",
-      "models": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct"]
+      "models": [
+        "llama-3.3-70b-versatile",
+        "openai/gpt-oss-120b",
+        "moonshotai/kimi-k2-instruct"
+      ]
     },
     {
       "name": "cerebras",
       "prefix": "cerebras/",
       "base": "https://api.cerebras.ai/v1",
       "api_key_env": "CEREBRAS_API_KEY",
-      "models": ["llama-3.3-70b", "qwen-3-235b-a22b-instruct-2507"]
+      "models": [
+        "gpt-oss-120b",
+        "qwen-3.8-27b",
+        "gemma-4-31b"
+      ]
     },
     {
       "name": "openrouter",
@@ -35,14 +43,20 @@
       "base": "https://openrouter.ai/api/v1",
       "api_key_env": "OPENROUTER_API_KEY",
       "headers": {},
-      "models": ["moonshotai/kimi-k2:free", "qwen/qwen3-coder:free"]
+      "models": [
+        "moonshotai/kimi-k2:free",
+        "qwen/qwen3-coder:free"
+      ]
     },
     {
       "name": "gemini",
       "prefix": "gemini/",
       "base": "https://generativelanguage.googleapis.com/v1beta/openai/",
       "api_key_env": "GEMINI_API_KEY",
-      "models": ["gemini-2.5-flash", "gemini-2.5-pro"]
+      "models": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro"
+      ]
     }
   ]
 }

@@ -32,8 +32,9 @@
       "base": "https://api.cerebras.ai/v1",
       "api_key_env": "CEREBRAS_API_KEY",
       "models": [
-        "llama-3.3-70b",
-        "qwen-3-235b-a22b-instruct-2507"
+        "gpt-oss-120b",
+        "qwen-3.8-27b",
+        "gemma-4-31b"
       ]
     },
     {
