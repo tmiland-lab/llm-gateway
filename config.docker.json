@@ -4,7 +4,8 @@
     "PUT-A-LONG-RANDOM-KEY-HERE": {
       "name": "tommy",
       "rpm": 60,
-      "daily_requests": 2000
+      "daily_requests": 2000,
+      "daily_tokens": 2000000
     }
   },
   "routes": [
@@ -13,7 +14,11 @@
       "prefix": "local/",
       "base": "http://host.docker.internal:11434/v1",
       "api_key_env": null,
-      "models": []
+      "models": [],
+      "price_per_mtok": {
+        "in": 0,
+        "out": 0
+      }
     },
     {
       "name": "groq",
@@ -25,7 +30,11 @@
         "openai/gpt-oss-120b",
         "moonshotai/kimi-k2-instruct"
       ],
-      "burst": true
+      "burst": true,
+      "price_per_mtok": {
+        "in": 0,
+        "out": 0
+      }
     },
     {
       "name": "cerebras",
@@ -37,7 +46,11 @@
         "qwen-3.8-27b",
         "gemma-4-31b"
       ],
-      "burst": true
+      "burst": true,
+      "price_per_mtok": {
+        "in": 0,
+        "out": 0
+      }
     },
     {
       "name": "openrouter",
@@ -53,7 +66,11 @@
         "google/gemma-4-31b-it:free"
       ],
       "drop_reasoning": true,
-      "burst": true
+      "burst": true,
+      "price_per_mtok": {
+        "in": 0,
+        "out": 0
+      }
     },
     {
       "name": "gemini",
@@ -64,7 +81,11 @@
         "gemini-3.6-flash",
         "gemini-3.7-flash"
       ],
-      "burst": true
+      "burst": true,
+      "price_per_mtok": {
+        "in": 0,
+        "out": 0
+      }
     },
     {
       "name": "digitalocean",
@@ -78,7 +99,33 @@
         "glm-5.3",
         "deepseek-v4-pro"
       ],
-      "burst": true
+      "burst": true,
+      "price_per_mtok": {
+        "in": 0.06,
+        "out": 0.39
+      },
+      "model_prices": {
+        "kimi": {
+          "in": 0.95,
+          "out": 4.0
+        },
+        "glm": {
+          "in": 0.95,
+          "out": 3.4
+        },
+        "deepseek-v4-pro": {
+          "in": 0.87,
+          "out": 1.74
+        },
+        "deepseek-v4-flash": {
+          "in": 0.068,
+          "out": 0.168
+        },
+        "nemotron": {
+          "in": 0.9,
+          "out": 1.7
+        }
+      }
     },
     {
       "name": "kilo",
@@ -90,7 +137,11 @@
         "cohere/north-mini-code:free",
         "nvidia/nemotron-3-ultra-550b-a55b:free",
         "nvidia/nemotron-3-super-120b-a12b:free"
-      ]
+      ],
+      "price_per_mtok": {
+        "in": 0,
+        "out": 0
+      }
     }
   ]
 }

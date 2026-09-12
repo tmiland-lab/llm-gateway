@@ -55,6 +55,11 @@ def db():
         "ts INTEGER, client TEXT, route TEXT, model TEXT, "
         "status INTEGER, ms INTEGER)"
     )
+    for col in ("in_tok INTEGER DEFAULT 0", "out_tok INTEGER DEFAULT 0"):
+        try:
+            conn.execute(f"ALTER TABLE hits ADD COLUMN {col}")
+        except Exception:
+            pass
     return conn
 
 
@@ -86,8 +91,8 @@ async function load(){
   document.getElementById('nmodels').textContent = s.models.length;
   document.getElementById('models').innerHTML = '<tr><th>id</th><th>via</th></tr>' +
     s.models.map(x => '<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td></tr>').join('');
-  document.getElementById('usage').innerHTML = '<tr><th>client</th><th>requests</th></tr>' +
-    (s.usage_today.map(x => '<tr><td>'+esc(x.client)+'</td><td>'+x.requests+'</td></tr>').join('') || '<tr><td colspan=2 class=mut>none yet</td></tr>');
+  document.getElementById('usage').innerHTML = '<tr><th>client</th><th>model</th><th>req</th><th>in/out tok</th><th>est $</th></tr>' +
+    (s.usage_today.map(x => '<tr><td>'+esc(x.client)+'</td><td><code>'+esc(x.model||x.route)+'</code></td><td>'+x.requests+'</td><td>'+x.in_tokens+'/'+x.out_tokens+'</td><td>$'+x.est_usd.toFixed(4)+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
   document.getElementById('recent').innerHTML = '<tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr>' +
     (s.recent.map(x => '<tr><td>'+new Date(x.at*1000).toLocaleTimeString()+'</td><td>'+esc(x.client)+'</td><td><code>'+esc(x.model)+'</code></td><td class="'+(x.status===200?'ok':'bad')+'">'+x.status+'</td><td>'+x.ms+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
 }
@@ -140,19 +145,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return f"rate limit: {rpm} requests in the last minute (own limit: {client.get('rpm', 60)}/min)"
         if daily >= client.get("daily_requests", 1000):
             return f"daily budget spent: {daily} requests (own limit: {client.get('daily_requests', 1000)}/day)"
+        token_cap = client.get("daily_tokens")
+        if token_cap:
+            tally = db()
+            try:
+                toks = tally.execute(
+                    "SELECT COALESCE(SUM(in_tok),0)+COALESCE(SUM(out_tok),0) FROM hits WHERE client=? AND ts>=?",
+                    (client_name, day_start),
+                ).fetchone()[0]
+            finally:
+                tally.close()
+            if toks >= token_cap:
+                return f"daily token budget spent: {toks} tokens (own limit: {token_cap}/day)"
         return None
 
-    def _log(self, client_name, route, model, status, ms):
+    def _log(self, client_name, route, model, status, ms, intok=0, outtok=0):
         try:
             conn = db()
             conn.execute(
-                "INSERT INTO hits VALUES(?,?,?,?,?,?)",
-                (int(time.time()), client_name, route, model, status, ms),
+                "INSERT INTO hits VALUES(?,?,?,?,?,?,?,?)",
+                (int(time.time()), client_name, route, model, status, ms, intok, outtok),
             )
             conn.commit()
             conn.close()
         except Exception:
             pass
+
+    @staticmethod
+    def _usage_of(payload):
+        """Pull (in_tokens, out_tokens) out of an OpenAI-style body."""
+        try:
+            u = payload.get("usage") or {}
+            return int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+        except Exception:
+            return 0, 0
 
     def _route_for(self, model):
         for route in self.server.cfg.get("routes", []):
@@ -168,26 +194,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
             client = self._auth_client()
             if not client:
                 return self._json(401, {"error": "bad gateway api key"})
-            now = int(time.time())
-            conn = db()
-            rows = conn.execute(
-                "SELECT client, COUNT(*), MAX(ts) FROM hits WHERE ts>=? GROUP BY client",
-                (now - (now % 86400),),
-            ).fetchall()
-            conn.close()
-            return self._json(200, {
-                "today": [{"client": c, "requests": n, "last": t} for c, n, t in rows],
-            })
+            agg = {}
+            for row in self._today_spend():
+                a = agg.setdefault(row["client"], {"client": row["client"], "requests": 0,
+                                                   "in_tokens": 0, "out_tokens": 0, "est_usd": 0.0})
+                a["requests"] += row["requests"]
+                a["in_tokens"] += row["in_tokens"]
+                a["out_tokens"] += row["out_tokens"]
+                a["est_usd"] = round(a["est_usd"] + row["est_usd"], 4)
+            return self._json(200, {"today": list(agg.values())})
+
+    def _price_for(self, route_prefix, model):
+        """Per-model prices (substring match on the model id), falling back
+        to the route default. DO's kimi costs ~16x its 120b — one number
+        per route would lie."""
+        for r in self.server.cfg.get("routes", []):
+            if r["prefix"] != route_prefix:
+                continue
+            for key, p in (r.get("model_prices") or {}).items():
+                if key in (model or ""):
+                    return p
+            return r.get("price_per_mtok") or {"in": 0, "out": 0}
+        return {"in": 0, "out": 0}
+
+    def _today_spend(self):
+        """Per-(client, route, model) token sums with per-model pricing."""
+        now = int(time.time())
+        conn = db()
+        rows = conn.execute(
+            "SELECT client, route, model, COALESCE(SUM(in_tok),0), COALESCE(SUM(out_tok),0), COUNT(*) FROM hits WHERE ts>=? GROUP BY client, route, model",
+            (now - (now % 86400),),
+        ).fetchall()
+        conn.close()
+        out = []
+        for c, ro, m, i, o, n in rows:
+            p = self._price_for(ro, m)
+            out.append({"client": c, "route": ro, "model": m, "requests": n,
+                        "in_tokens": i, "out_tokens": o,
+                        "est_usd": round(i / 1e6 * p["in"] + o / 1e6 * p["out"], 4)})
+        return out
         if self.path == "/v1/models":
             return self._json(200, {"object": "list",
                                     "data": self._virtual_models()})
         if self.path == "/api/status":
-            now = int(time.time())
+            usage = self._today_spend()
             conn = db()
-            usage = conn.execute(
-                "SELECT client, COUNT(*) FROM hits WHERE ts>=? GROUP BY client",
-                (now - (now % 86400),),
-            ).fetchall()
             recent = conn.execute(
                 "SELECT ts, client, route, model, status, ms FROM hits "
                 "ORDER BY ts DESC LIMIT 20",
@@ -203,7 +254,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._json(200, {
                 "models": self._virtual_models(),
                 "routes": routes,
-                "usage_today": [{"client": c, "requests": n} for c, n in usage],
+                "usage_today": usage,
                 "recent": [{"at": t, "client": c, "route": ro, "model": m,
                             "status": s, "ms": ms}
                            for t, c, ro, m, s, ms in recent],
@@ -270,6 +321,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # content + tool calls directly — what an agent loop needs.
         if route.get("drop_reasoning") and "reasoning" not in body:
             body["reasoning"] = {"exclude": True}
+        if body.get("stream") and "stream_options" not in body:
+            body["stream_options"] = {"include_usage": True}
         out = json.dumps(body).encode()
 
         parts = urllib.parse.urlsplit(route["base"])
@@ -322,6 +375,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
+                intok = outtok = 0
+                if status == 200:
+                    try:
+                        intok, outtok = self._usage_of(json.loads(payload.decode()))
+                    except Exception:
+                        pass
+                self._log(name, route["prefix"], model, status,
+                          int((time.time() - t0) * 1000), intok, outtok)
+                return
             self._log(name, route["prefix"], model, status,
                       int((time.time() - t0) * 1000))
         except Exception as e:
@@ -343,6 +405,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         tools = {}
         finish = None
         first = None
+        in_tok = out_tok = 0
         # Provider extensions (e.g. Google thought_signature for thinking
         # models) must survive reassembly: opencode sends them back on the
         # next turn, and upstream 400s when they're missing. Shallow-merge,
@@ -398,6 +461,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         e["arguments"] += fn["arguments"]
                 if ch.get("finish_reason"):
                     finish = ch["finish_reason"]
+                if d.get("usage"):
+                    in_tok, out_tok = self._usage_of(d)
         except Exception as e:
             self._log(client_name, route.get("prefix", "?"), model, 504,
                       int((time.time() - t0) * 1000))
@@ -444,7 +509,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             self.close_connection = True
         self._log(client_name, route["prefix"], model, 200,
-                  int((time.time() - t0) * 1000))
+                  int((time.time() - t0) * 1000), in_tok, out_tok)
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[%s] %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
