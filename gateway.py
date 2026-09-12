@@ -79,6 +79,11 @@ h1{font-size:1.35em;margin:0}
 .sub{color:var(--mut);font-size:.9em}
 .live{display:inline-block;width:.55em;height:.55em;border-radius:50%;background:var(--ok);margin-right:.35em;box-shadow:0 0 6px var(--ok)}
 #st{color:var(--mut);font-size:.82em}
+.tabs{display:flex;gap:.4em;margin:1.2em 0 0;flex-wrap:wrap}
+.tabs button{background:var(--panel);color:var(--mut);border:1px solid var(--border);border-radius:8px 8px 0 0;padding:.5em 1em;font-size:.9em;cursor:pointer;border-bottom:none}
+.tabs button.on{background:#1c2128;color:var(--text);font-weight:600}
+.tab{display:none}
+.tab.on{display:block}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7em;margin:1.2em 0 .4em}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:.7em .9em}
 .card .v{font-size:1.35em;font-weight:650}
@@ -95,35 +100,65 @@ tr:hover td{background:#1c2128}
 .pill.bad{background:rgba(248,81,73,.14)}
 code{background:#0d1117;border:1px solid var(--border);padding:.1em .4em;border-radius:6px;font-size:.88em}
 input[type=checkbox]{accent-color:var(--acc);width:1em;height:1em;cursor:pointer}
+input[type=text],input[type=password],input[type=number]{background:#0d1117;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:.4em .6em;font-size:.88em}
+button.act{background:#1c2128;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.35em .8em;font-size:.85em;cursor:pointer}
+button.act:hover{border-color:var(--acc)}
+button.act:disabled{opacity:.5;cursor:wait}
+.search{width:100%;margin:.4em 0 .2em}
+.chain{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:.7em .9em;margin:.5em 0;font-size:.88em}
+.chain .arrow{color:var(--acc);font-weight:700}
+.tnote{font-size:.8em;color:var(--mut);margin-top:.4em}
+.keyrow{display:flex;gap:.5em;align-items:center;flex-wrap:wrap;margin:.4em 0}
 footer{margin-top:2.5em;color:var(--mut);font-size:.8em}
-footer code{font-size:.85em}
 </style></head><body>
 <header><h1><span class="live"></span>llm-gateway</h1><span class="sub">own API, own limits</span></header>
 <p id="st">loading…</p>
+<div class="tabs">
+<button id="t-overview" class="on" onclick="showTab('overview')">Overview</button>
+<button id="t-models" onclick="showTab('models')">Models</button>
+<button id="t-activity" onclick="showTab('activity')">Activity</button>
+<button id="t-keys" onclick="showTab('keys')">Keys</button>
+</div>
+<div class="tab on" id="tab-overview">
 <div class="cards">
 <div class="card"><div class="v" id="c-models">–</div><div class="l">models</div></div>
 <div class="card"><div class="v" id="c-routes">–</div><div class="l">routes ready</div></div>
 <div class="card"><div class="v" id="c-req">–</div><div class="l">requests today</div></div>
 <div class="card"><div class="v" id="c-spend">–</div><div class="l">est. spend today</div></div>
 </div>
-<h2>Routes (toggle to enable/disable)</h2><table id="routes"><tr><th>on</th><th>prefix</th><th>name</th><th>status</th></tr></table>
-<h2>Models (<span id="nmodels">0</span>, toggle to enable/disable)</h2><table id="models"><tr><th>on</th><th>id</th><th>via</th></tr></table>
-<h2>Usage today</h2><table id="usage"><tr><th>client</th><th>requests</th></tr></table>
-<h2>Recent requests</h2><table id="recent"><tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr></table>
+<h2>Failover chains (cheapest first)</h2><div id="chains"></div>
+<h2>Routes (toggle to enable/disable)</h2><table id="routes"></table>
+</div>
+<div class="tab" id="tab-models">
+<h2>Models (<span id="nmodels">0</span>)</h2>
+<input class="search" id="q" type="text" placeholder="filter models…" oninput="renderModels()">
+<table id="models"></table>
+<div class="tnote">Tick a model off to hide it from <code>/v1/models</code> and refuse calls with 403. Test runs a tiny live call (logged as client <code>dashboard</code>).</div>
+</div>
+<div class="tab" id="tab-activity">
+<h2>Usage today</h2><table id="usage"></table>
+<h2>Recent requests</h2><table id="recent"></table>
+</div>
+<div class="tab" id="tab-keys">
+<h2>Provider keys</h2><div id="keyforms"></div>
+<div class="tnote">Keys are stored in the 0600 env file on the server, never in git. Only the last 4 characters are ever displayed.</div>
+<h2>Gateway clients</h2><table id="clients"></table>
+<div class="keyrow"><input id="newname" type="text" placeholder="client name"><input id="newrpm" type="number" value="60" style="width:6em" title="req/min"><input id="newdaily" type="number" value="2000" style="width:8em" title="req/day"><button class="act" onclick="addClient()">add client</button></div>
+<div id="newtoken" class="tnote"></div>
+</div>
+<footer>llm-gateway · static surface on GitHub, stateful proxy here · localhost trust domain</footer>
 <script>
+let S = null;
+function showTab(n){
+  document.querySelectorAll('.tab').forEach(e => e.classList.remove('on'));
+  document.querySelectorAll('.tabs button').forEach(e => e.classList.remove('on'));
+  document.getElementById('tab-'+n).classList.add('on');
+  document.getElementById('t-'+n).classList.add('on');
+}
 async function load(){
-  const r = await fetch('/api/status'); const s = await r.json();
+  const r = await fetch('/api/status'); const s = await r.json(); S = s;
   document.getElementById('st').textContent = 'updated ' + new Date().toLocaleTimeString();
   const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  async function setCfg(body){
-    const r = await fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    if(!r.ok) alert('save failed: '+r.status);
-    load();
-  }
-  window.gwToggle = (prefix, on) => setCfg({route: prefix, disabled: !on});
-  window.gwModelToggle = (prefix, id, on) => setCfg({route: prefix, model: id, disabled: !on});
-  const owner = {};
-  s.routes.forEach(x => (x.models||[]).forEach(m => owner[m] = x.prefix));
   const ready = s.routes.filter(x => x.enabled && x.ready).length;
   document.getElementById('c-models').textContent = s.models.length;
   document.getElementById('c-routes').textContent = ready + '/' + s.routes.length;
@@ -131,21 +166,79 @@ async function load(){
   s.usage_today.forEach(x => { treq += x.requests; tspend += x.est_usd; });
   document.getElementById('c-req').textContent = treq;
   document.getElementById('c-spend').textContent = '$' + (tspend < 0.01 ? tspend.toFixed(6) : tspend.toFixed(2));
+  document.getElementById('chains').innerHTML = Object.keys(s.mirrors||{}).map(g => {
+    const ms = s.mirrors[g].map(m => '<code>'+esc(m.model)+'</code> <span class="mut">$'+(((m.price||{}).in||0)+((m.price||{}).out||0)).toFixed(2)+'/M</span>' + (m.ready && m.enabled !== false ? '' : ' <span class="pill bad">'+esc(m.why||'off')+'</span>')).join(' <span class="arrow">→</span> ');
+    return '<div class="chain"><code>'+esc(g)+'</code><br>'+ms+'</div>';
+  }).join('') || '<div class="mut">no mirror groups</div>';
   document.getElementById('routes').innerHTML = '<tr><th>on</th><th>prefix</th><th>name</th><th>status</th></tr>' +
-    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\\''+esc(x.prefix)+'\\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td><span class="pill '+(x.ready?'ok':'bad')+'">'+(x.ready?(x.enabled?'ready':'off'):'needs '+esc(x.need||''))+'</span></td></tr>').join('');
-  document.getElementById('nmodels').textContent = s.models.length;
-  let rows = s.models.map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\\''+esc(owner[x.id]||'')+'\\',\\''+esc(x.id)+'\\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td></tr>').join('');
-  s.routes.forEach(x => (x.disabled_models||[]).forEach(m => {
-    rows += '<tr><td><input type="checkbox" onchange="gwModelToggle(\\''+esc(x.prefix)+'\\',\\''+esc(m)+'\\',this.checked)"></td><td><code>'+esc(m)+'</code></td><td class="mut">disabled</td></tr>';
-  }));
-  document.getElementById('models').innerHTML = '<tr><th>on</th><th>id</th><th>via</th></tr>' + (rows || '<tr><td colspan=3 class=mut>none</td></tr>');
+    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\''+esc(x.prefix)+'\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td><span class="pill '+(x.ready?'ok':'bad')+'">'+(x.ready?(x.enabled?'ready':'off'):'needs '+esc(x.need||''))+'</span></td></tr>').join('');
+  renderModels();
   document.getElementById('usage').innerHTML = '<tr><th>client</th><th>model</th><th>req</th><th>in/out tok</th><th>est $</th></tr>' +
     (s.usage_today.map(x => '<tr><td>'+esc(x.client)+'</td><td><code>'+esc(x.model||x.route)+'</code></td><td>'+x.requests+'</td><td>'+x.in_tokens+'/'+x.out_tokens+'</td><td>$'+Number(x.est_usd).toFixed(6)+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
   document.getElementById('recent').innerHTML = '<tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr>' +
     (s.recent.map(x => '<tr><td>'+new Date(x.at*1000).toLocaleTimeString()+'</td><td>'+esc(x.client)+'</td><td><code>'+esc(x.model)+'</code></td><td class="'+(x.status===200?'ok':'bad')+'">'+x.status+'</td><td>'+x.ms+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
+  renderKeys();
 }
+function renderModels(){
+  if(!S) return;
+  const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const owner = {};
+  S.routes.forEach(x => (x.models||[]).forEach(m => owner[m] = x.prefix));
+  const q = (document.getElementById('q').value||'').toLowerCase();
+  let rows = S.models.filter(x => x.id.toLowerCase().includes(q)).map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\''+esc(owner[x.id]||'')+'\',\''+esc(x.id)+'\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td><td><button class="act" onclick="testModel(\''+esc(x.id)+'\',this)">test</button> <span class="tres mut"></span></td></tr>').join('');
+  S.routes.forEach(x => (x.disabled_models||[]).forEach(m => {
+    if(!m.toLowerCase().includes(q)) return;
+    rows += '<tr><td><input type="checkbox" onchange="gwModelToggle(\''+esc(x.prefix)+'\',\''+esc(m)+'\',this.checked)"></td><td><code>'+esc(m)+'</code></td><td class="mut">disabled</td><td></td></tr>';
+  }));
+  document.getElementById('models').innerHTML = '<tr><th>on</th><th>id</th><th>via</th><th></th></tr>' + (rows || '<tr><td colspan=4 class=mut>none</td></tr>');
+  document.getElementById('nmodels').textContent = S.models.length;
+}
+async function api(path, body){
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const j = await r.json().catch(() => ({}));
+  if(!r.ok) alert('failed: ' + (j.error || r.status));
+  return {ok: r.ok, j};
+}
+async function setCfg(body){ await api('/api/config', body); load(); }
+window.gwToggle = (prefix, on) => setCfg({route: prefix, disabled: !on});
+window.gwModelToggle = (prefix, id, on) => setCfg({route: prefix, model: id, disabled: !on});
+window.testModel = async (id, btn) => {
+  btn.disabled = true;
+  const cell = btn.parentElement.querySelector('.tres');
+  cell.textContent = '…';
+  const {ok, j} = await api('/api/test', {model: id});
+  if(ok && j.ok){ cell.textContent = j.winner.split('/').pop() + ' ' + (j.attempts.find(a=>a.ok)||{}).ms + 'ms ✓'; cell.className = 'tres ok'; }
+  else { const a = (j.attempts||[]).find(a=>!a.ok); cell.textContent = (a ? (a.error||'') : 'failed').slice(0,60); cell.className = 'tres bad'; }
+  btn.disabled = false;
+};
+function renderKeys(){
+  const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  document.getElementById('keyforms').innerHTML = S.routes.filter(x => x.need).map(x =>
+    '<div class="keyrow"><code>'+esc(x.prefix)+'</code><span class="mut">'+esc(x.need)+'</span>' +
+    (x.key_hint ? '<span class="pill ok">set '+esc(x.key_hint)+'</span>' : '<span class="pill bad">missing</span>') +
+    ' <input type="password" id="k-'+esc(x.prefix)+'" placeholder="paste new key"><button class="act" onclick="saveKey(\''+esc(x.prefix)+'\')">save</button></div>'
+  ).join('') || '<div class="mut">no keyed routes</div>';
+  api('/api/clients', {action:'list'}).then(({j}) => {
+    document.getElementById('clients').innerHTML = '<tr><th>client</th><th>rpm</th><th>req/day</th><th>tok/day</th><th>key</th><th></th></tr>' +
+      ((j.clients||[]).map(c => '<tr><td>'+esc(c.name)+'</td><td>'+c.rpm+'</td><td>'+c.daily_requests+'</td><td>'+c.daily_tokens+'</td><td class="mut">'+esc(c.key_hint)+'</td><td><button class="act" onclick="revokeClient(\''+esc(c.name)+'\')">revoke</button></td></tr>').join('') || '<tr><td colspan=6 class=mut>none</td></tr>');
+  });
+}
+window.saveKey = async (prefix) => {
+  const v = document.getElementById('k-'+prefix).value;
+  if(!v) return;
+  const {ok} = await api('/api/keys', {route: prefix, key: v});
+  if(ok) load();
+};
+window.addClient = async () => {
+  const {ok, j} = await api('/api/clients', {action:'add', name: document.getElementById('newname').value, rpm: +document.getElementById('newrpm').value, daily_requests: +document.getElementById('newdaily').value});
+  if(ok){ document.getElementById('newtoken').innerHTML = 'new client key (shown once): <code>'+esc(j.token)+'</code>'; load(); }
+};
+window.revokeClient = async (name) => { if(confirm('revoke '+name+'?')){ await api('/api/clients', {action:'revoke', name}); load(); } };
 load(); setInterval(load, 30000);
-</script></body></html>"""
+</script></body></html>
+
+"""
+
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
