@@ -234,8 +234,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except BrokenPipeError:
                 pass
 
-    def log_message(self, *args):
-        sys.stderr.write("[%s] %s\n" % (time.strftime("%H:%M:%S"), args[1] % args[2:]))
+    def log_message(self, fmt, *args):
+        sys.stderr.write("[%s] %s\n" % (time.strftime("%H:%M:%S"), fmt % args))
 
 
 def main():
