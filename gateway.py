@@ -308,23 +308,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             return self._json(400, {"error": "invalid JSON body"})
         model = body.get("model", "")
-        route, upstream_model = self._route_for(model)
-        if route is None:
-            return self._json(404, {"error": f"no route for model '{model}'"})
-        if route.get("api_key_env") and not route.get("api_key"):
-            return self._json(402, {"error": (
-                f"route '{route['prefix']}' needs a free provider key: "
-                f"set {route['api_key_env']} and restart the gateway")})
-        body["model"] = upstream_model
-        # Fork: thinking models (OpenRouter free reasoning flood) stream
-        # endless reasoning deltas the client never displays, so the user
-        # sees "no answer" until abort. Excluding reasoning returns final
-        # content + tool calls directly — what an agent loop needs.
-        if route.get("drop_reasoning") and "reasoning" not in body:
-            body["reasoning"] = {"exclude": True}
+        # NOTE: routing happens in the mirror/candidate block below (which
+        # also owns the 402/404 answers); nothing may return early here.
         if body.get("stream") and "stream_options" not in body:
             body["stream_options"] = {"include_usage": True}
-        out = json.dumps(body).encode()
 
         t0 = time.time()
 
@@ -357,6 +344,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 continue
             cand_body = dict(body)
             cand_body["model"] = upstream_model
+            # Per-route thinking suppression (OpenRouter free reasoning
+            # flood): excluding reasoning returns final content + tool
+            # calls directly — what an agent loop needs.
+            if route.get("drop_reasoning") and "reasoning" not in cand_body:
+                cand_body["reasoning"] = {"exclude": True}
             cand_out = json.dumps(cand_body).encode()
             try:
                 resp = self._post_upstream(route, cand_out)
