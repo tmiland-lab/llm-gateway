@@ -44,8 +44,11 @@
       "api_key_env": "OPENROUTER_API_KEY",
       "headers": {},
       "models": [
-        "moonshotai/kimi-k2:free",
-        "qwen/qwen3-coder:free"
+        "nvidia/nemotron-3-super-120b-a12b:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "cohere/north-mini-code:free",
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "google/gemma-4-31b-it:free"
       ]
     },
     {
