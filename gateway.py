@@ -733,6 +733,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except Exception:
             return self._json(400, {"error": "invalid JSON body"})
         model = body.get("model", "")
+        if model == "local/devstral-24b":
+            try:
+                with open("/tmp/opencode/last-devstral-body.json", "w") as f:
+                    json.dump(body, f)
+            except Exception:
+                pass
         try:
             shapes = [(m.get("role"), type(m.get("content")).__name__,
                        len(m.get("content")) if isinstance(m.get("content"), list) else len(str(m.get("content") or "")))
