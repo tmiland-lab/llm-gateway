@@ -102,7 +102,6 @@
         "deepseek-v4-flash-0731",
         "llama-4-maverick"
       ],
-      "burst": true,
       "price_per_mtok": {
         "in": 0.06,
         "out": 0.39
