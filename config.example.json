@@ -1,0 +1,48 @@
+{
+  "listen": "127.0.0.1:4143",
+  "clients": {
+    "PUT-A-LONG-RANDOM-KEY-HERE": {
+      "name": "tommy",
+      "rpm": 60,
+      "daily_requests": 2000
+    }
+  },
+  "routes": [
+    {
+      "name": "ollama",
+      "prefix": "local/",
+      "base": "http://localhost:11434/v1",
+      "api_key_env": null,
+      "models": []
+    },
+    {
+      "name": "groq",
+      "prefix": "groq/",
+      "base": "https://api.groq.com/openai/v1",
+      "api_key_env": "GROQ_API_KEY",
+      "models": ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "moonshotai/kimi-k2-instruct"]
+    },
+    {
+      "name": "cerebras",
+      "prefix": "cerebras/",
+      "base": "https://api.cerebras.ai/v1",
+      "api_key_env": "CEREBRAS_API_KEY",
+      "models": ["llama-3.3-70b", "qwen-3-235b-a22b-instruct-2507"]
+    },
+    {
+      "name": "openrouter",
+      "prefix": "openrouter/",
+      "base": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "headers": {},
+      "models": ["moonshotai/kimi-k2:free", "qwen/qwen3-coder:free"]
+    },
+    {
+      "name": "gemini",
+      "prefix": "gemini/",
+      "base": "https://generativelanguage.googleapis.com/v1beta/openai/",
+      "api_key_env": "GEMINI_API_KEY",
+      "models": ["gemini-2.5-flash", "gemini-2.5-pro"]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=llm-gateway (own API with own limits)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/llm-gateway/gateway.py
+EnvironmentFile=%h/.config/llm-gateway/env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
