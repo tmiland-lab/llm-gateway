@@ -213,7 +213,9 @@ function renderModels(){
   const owner = {};
   S.routes.forEach(x => (x.models||[]).forEach(m => owner[m] = x.prefix));
   const q = (document.getElementById('q').value||'').toLowerCase();
-  let rows = S.models.filter(x => x.id.toLowerCase().includes(q)).map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\\''+esc(owner[x.id]||'')+'\\',\\''+esc(x.id)+'\\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td><td><button class="act" onclick="testModel(\\''+esc(x.id)+'\\',this)">test</button> <span class="tres mut"></span></td></tr>').join('');
+  let rows = S.models.filter(x => x.id.toLowerCase().includes(q)).map(x => {
+    const last = x.last ? ' <span class="pill '+(x.last.status===200?'ok':'bad')+'">'+x.last.status+'</span>' : '';
+    return '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\\''+esc(owner[x.id]||'')+'\\',\\''+esc(x.id)+'\\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td><td><button class="act" onclick="testModel(\\''+esc(x.id)+'\\',this)">test</button> <span class="tres mut"></span></td></tr>'}).join('');
   S.routes.forEach(x => (x.disabled_models||[]).forEach(m => {
     if(!m.toLowerCase().includes(q)) return;
     rows += '<tr><td><input type="checkbox" onchange="gwModelToggle(\\''+esc(x.prefix)+'\\',\\''+esc(m)+'\\',this.checked)"></td><td><code>'+esc(m)+'</code></td><td class="mut">disabled</td><td></td></tr>';
@@ -417,6 +419,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "ORDER BY ts DESC LIMIT 20",
             ).fetchall()
             conn.close()
+            last_seen = {}
+            for t, c, ro, m, s, ms in recent:
+                last_seen.setdefault(m, {"status": s, "at": t, "ms": ms})
             routes = []
             for r in self.server.cfg.get("routes", []):
                 if r["prefix"] == "local/":
@@ -436,8 +441,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             mirrors = {}
             for group, members in self.server.cfg.get("mirrors", {}).items():
                 mirrors[group] = self._mirror_plan(members)
+            models = self._virtual_models()
+            for entry in models:
+                seen = last_seen.get(entry["id"])
+                if seen:
+                    entry["last"] = seen
             return self._json(200, {
-                "models": self._virtual_models(),
+                "models": models,
                 "routes": routes,
                 "mirrors": mirrors,
                 "usage_today": usage,
