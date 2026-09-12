@@ -67,16 +67,41 @@ UI_PAGE = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>llm-gateway — own API</title>
 <style>
-body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;max-width:900px;margin:2em auto;padding:0 1em}
-h1{font-size:1.3em}h2{font-size:1.05em;margin-top:1.6em;border-bottom:1px solid #30363d;padding-bottom:.3em}
-table{border-collapse:collapse;width:100%;font-size:.9em}
-td,th{border:1px solid #30363d;padding:.35em .6em;text-align:left}
-.ok{color:#3fb950}.bad{color:#f85149}.mut{color:#8b949e}
-code{background:#161b22;padding:.1em .35em;border-radius:4px;font-size:.9em}
-#st{font-size:.85em}
+:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#e6edf3;--mut:#8b949e;--acc:#d29922;--ok:#3fb950;--bad:#f85149}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);max-width:1000px;margin:0 auto;padding:1.5em 1em 3em}
+header{display:flex;align-items:baseline;gap:.6em;flex-wrap:wrap}
+h1{font-size:1.35em;margin:0}
+.sub{color:var(--mut);font-size:.9em}
+.live{display:inline-block;width:.55em;height:.55em;border-radius:50%;background:var(--ok);margin-right:.35em;box-shadow:0 0 6px var(--ok)}
+#st{color:var(--mut);font-size:.82em}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7em;margin:1.2em 0 .4em}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:.7em .9em}
+.card .v{font-size:1.35em;font-weight:650}
+.card .l{color:var(--mut);font-size:.78em;margin-top:.15em}
+h2{font-size:1em;margin:1.8em 0 .6em;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+table{border-collapse:collapse;width:100%;font-size:.88em;background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+td,th{border-bottom:1px solid var(--border);padding:.45em .7em;text-align:left}
+tr:last-child td{border-bottom:none}
+th{color:var(--mut);font-weight:600;font-size:.8em;text-transform:uppercase;letter-spacing:.04em}
+tr:hover td{background:#1c2128}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.mut{color:var(--mut)}
+.pill{display:inline-block;padding:.1em .55em;border-radius:99px;font-size:.8em;font-weight:600}
+.pill.ok{background:rgba(63,185,80,.14)}
+.pill.bad{background:rgba(248,81,73,.14)}
+code{background:#0d1117;border:1px solid var(--border);padding:.1em .4em;border-radius:6px;font-size:.88em}
+input[type=checkbox]{accent-color:var(--acc);width:1em;height:1em;cursor:pointer}
+footer{margin-top:2.5em;color:var(--mut);font-size:.8em}
+footer code{font-size:.85em}
 </style></head><body>
-<h1>llm-gateway <span class="mut">— own API, own limits</span></h1>
-<p id="st" class="mut">loading…</p>
+<header><h1><span class="live"></span>llm-gateway</h1><span class="sub">own API, own limits</span></header>
+<p id="st">loading…</p>
+<div class="cards">
+<div class="card"><div class="v" id="c-models">–</div><div class="l">models</div></div>
+<div class="card"><div class="v" id="c-routes">–</div><div class="l">routes ready</div></div>
+<div class="card"><div class="v" id="c-req">–</div><div class="l">requests today</div></div>
+<div class="card"><div class="v" id="c-spend">–</div><div class="l">est. spend today</div></div>
+</div>
 <h2>Routes (toggle to enable/disable)</h2><table id="routes"><tr><th>on</th><th>prefix</th><th>name</th><th>status</th></tr></table>
 <h2>Models (<span id="nmodels">0</span>, toggle to enable/disable)</h2><table id="models"><tr><th>on</th><th>id</th><th>via</th></tr></table>
 <h2>Usage today</h2><table id="usage"><tr><th>client</th><th>requests</th></tr></table>
@@ -95,8 +120,15 @@ async function load(){
   window.gwModelToggle = (prefix, id, on) => setCfg({route: prefix, model: id, disabled: !on});
   const owner = {};
   s.routes.forEach(x => (x.models||[]).forEach(m => owner[m] = x.prefix));
+  const ready = s.routes.filter(x => x.enabled && x.ready).length;
+  document.getElementById('c-models').textContent = s.models.length;
+  document.getElementById('c-routes').textContent = ready + '/' + s.routes.length;
+  let treq = 0, tspend = 0;
+  s.usage_today.forEach(x => { treq += x.requests; tspend += x.est_usd; });
+  document.getElementById('c-req').textContent = treq;
+  document.getElementById('c-spend').textContent = '$' + (tspend < 0.01 ? tspend.toFixed(6) : tspend.toFixed(2));
   document.getElementById('routes').innerHTML = '<tr><th>on</th><th>prefix</th><th>name</th><th>status</th></tr>' +
-    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\\''+esc(x.prefix)+'\\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td class="'+(x.ready?'ok':'bad')+'">'+(x.ready?'ready':'needs '+esc(x.need||''))+'</td></tr>').join('');
+    s.routes.map(x => '<tr><td><input type="checkbox"'+(x.enabled?' checked':'')+' onchange="gwToggle(\\''+esc(x.prefix)+'\\',this.checked)"></td><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td><span class="pill '+(x.ready?'ok':'bad')+'">'+(x.ready?(x.enabled?'ready':'off'):'needs '+esc(x.need||''))+'</span></td></tr>').join('');
   document.getElementById('nmodels').textContent = s.models.length;
   let rows = s.models.map(x => '<tr><td><input type="checkbox" checked onchange="gwModelToggle(\\''+esc(owner[x.id]||'')+'\\',\\''+esc(x.id)+'\\',this.checked)"></td><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td></tr>').join('');
   s.routes.forEach(x => (x.disabled_models||[]).forEach(m => {
@@ -104,7 +136,7 @@ async function load(){
   }));
   document.getElementById('models').innerHTML = '<tr><th>on</th><th>id</th><th>via</th></tr>' + (rows || '<tr><td colspan=3 class=mut>none</td></tr>');
   document.getElementById('usage').innerHTML = '<tr><th>client</th><th>model</th><th>req</th><th>in/out tok</th><th>est $</th></tr>' +
-    (s.usage_today.map(x => '<tr><td>'+esc(x.client)+'</td><td><code>'+esc(x.model||x.route)+'</code></td><td>'+x.requests+'</td><td>'+x.in_tokens+'/'+x.out_tokens+'</td><td>$'+x.est_usd.toFixed(4)+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
+    (s.usage_today.map(x => '<tr><td>'+esc(x.client)+'</td><td><code>'+esc(x.model||x.route)+'</code></td><td>'+x.requests+'</td><td>'+x.in_tokens+'/'+x.out_tokens+'</td><td>$'+Number(x.est_usd).toFixed(6)+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
   document.getElementById('recent').innerHTML = '<tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr>' +
     (s.recent.map(x => '<tr><td>'+new Date(x.at*1000).toLocaleTimeString()+'</td><td>'+esc(x.client)+'</td><td><code>'+esc(x.model)+'</code></td><td class="'+(x.status===200?'ok':'bad')+'">'+x.status+'</td><td>'+x.ms+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
 }
