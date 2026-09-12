@@ -189,6 +189,14 @@
       "do/glm-5.3",
       "do/kimi-k3",
       "do/deepseek-v4-pro"
+    ],
+    "auto/debug": [
+      "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "kilo/nvidia/nemotron-3-ultra-550b-a55b:free",
+      "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+      "kilo/nvidia/nemotron-3-super-120b-a12b:free",
+      "openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+      "kilo/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
     ]
   }
 }
