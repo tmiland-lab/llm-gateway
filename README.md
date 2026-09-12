@@ -19,6 +19,24 @@ python3 ~/llm-gateway/gateway.py
 
 systemd (user): see `llm-gateway.service` — `systemctl --user enable --now llm-gateway`.
 
+## Web dashboard (local)
+
+The gateway serves its own UI — no build step, no JS deps:
+
+- `http://localhost:4143/ui` — routes (ready/missing key), models,
+  today's per-client usage, last 20 requests (auto-refresh 30s).
+
+## Docker (all-local option)
+
+```sh
+cp config.docker.json config/config.json  # then put your client key in it
+docker compose up --build -d              # UI at http://localhost:4143/ui
+```
+
+`config/` is gitignored (keys stay local). The container reaches host
+Ollama via `host.docker.internal`. Data (sqlite) lives in the `gwdata`
+volume.
+
 ## Use from opencode (`~/.config/opencode/opencode.jsonc`)
 
 ```jsonc

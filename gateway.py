@@ -29,8 +29,10 @@ import time
 import urllib.parse
 import urllib.request
 
-CONFIG_PATH = os.path.expanduser("~/.config/llm-gateway/config.json")
-DB_PATH = os.path.expanduser("~/.local/share/llm-gateway/usage.db")
+CONFIG_PATH = os.environ.get("GATEWAY_CONFIG",
+                             os.path.expanduser("~/.config/llm-gateway/config.json"))
+DB_PATH = os.environ.get("GATEWAY_DB",
+                         os.path.expanduser("~/.local/share/llm-gateway/usage.db"))
 
 
 def load_config():
@@ -56,6 +58,43 @@ def db():
     return conn
 
 
+UI_PAGE = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>llm-gateway — own API</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0d1117;color:#e6edf3;max-width:900px;margin:2em auto;padding:0 1em}
+h1{font-size:1.3em}h2{font-size:1.05em;margin-top:1.6em;border-bottom:1px solid #30363d;padding-bottom:.3em}
+table{border-collapse:collapse;width:100%;font-size:.9em}
+td,th{border:1px solid #30363d;padding:.35em .6em;text-align:left}
+.ok{color:#3fb950}.bad{color:#f85149}.mut{color:#8b949e}
+code{background:#161b22;padding:.1em .35em;border-radius:4px;font-size:.9em}
+#st{font-size:.85em}
+</style></head><body>
+<h1>llm-gateway <span class="mut">— own API, own limits</span></h1>
+<p id="st" class="mut">loading…</p>
+<h2>Routes</h2><table id="routes"><tr><th>prefix</th><th>name</th><th>status</th></tr></table>
+<h2>Models (<span id="nmodels">0</span>)</h2><table id="models"><tr><th>id</th><th>via</th></tr></table>
+<h2>Usage today</h2><table id="usage"><tr><th>client</th><th>requests</th></tr></table>
+<h2>Recent requests</h2><table id="recent"><tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr></table>
+<script>
+async function load(){
+  const r = await fetch('/api/status'); const s = await r.json();
+  document.getElementById('st').textContent = 'updated ' + new Date().toLocaleTimeString();
+  const esc = x => String(x).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  document.getElementById('routes').innerHTML = '<tr><th>prefix</th><th>name</th><th>status</th></tr>' +
+    s.routes.map(x => '<tr><td><code>'+esc(x.prefix)+'</code></td><td>'+esc(x.name)+'</td><td class="'+(x.ready?'ok':'bad')+'">'+(x.ready?'ready':'needs '+esc(x.need||''))+'</td></tr>').join('');
+  document.getElementById('nmodels').textContent = s.models.length;
+  document.getElementById('models').innerHTML = '<tr><th>id</th><th>via</th></tr>' +
+    s.models.map(x => '<tr><td><code>'+esc(x.id)+'</code></td><td>'+esc(x.owned_by)+'</td></tr>').join('');
+  document.getElementById('usage').innerHTML = '<tr><th>client</th><th>requests</th></tr>' +
+    (s.usage_today.map(x => '<tr><td>'+esc(x.client)+'</td><td>'+x.requests+'</td></tr>').join('') || '<tr><td colspan=2 class=mut>none yet</td></tr>');
+  document.getElementById('recent').innerHTML = '<tr><th>time</th><th>client</th><th>model</th><th>status</th><th>ms</th></tr>' +
+    (s.recent.map(x => '<tr><td>'+new Date(x.at*1000).toLocaleTimeString()+'</td><td>'+esc(x.client)+'</td><td><code>'+esc(x.model)+'</code></td><td class="'+(x.status===200?'ok':'bad')+'">'+x.status+'</td><td>'+x.ms+'</td></tr>').join('') || '<tr><td colspan=5 class=mut>none yet</td></tr>');
+}
+load(); setInterval(load, 30000);
+</script></body></html>"""
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = "llm-gateway/1.0"
     protocol_version = "HTTP/1.1"
@@ -65,6 +104,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _html(self, code, page):
+        body = page.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -132,18 +179,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "today": [{"client": c, "requests": n, "last": t} for c, n, t in rows],
             })
         if self.path == "/v1/models":
-            data = []
-            for route in self.server.cfg.get("routes", []):
-                if route["prefix"] == "local/":
-                    for m in self._ollama_models(route):
-                        data.append({"id": "local/" + m, "object": "model",
-                                     "owned_by": "ollama"})
-                else:
-                    for m in route.get("models", []):
-                        data.append({"id": route["prefix"] + m, "object": "model",
-                                     "owned_by": route.get("name", "upstream")})
-            return self._json(200, {"object": "list", "data": data})
+            return self._json(200, {"object": "list",
+                                    "data": self._virtual_models()})
+        if self.path == "/api/status":
+            now = int(time.time())
+            conn = db()
+            usage = conn.execute(
+                "SELECT client, COUNT(*) FROM hits WHERE ts>=? GROUP BY client",
+                (now - (now % 86400),),
+            ).fetchall()
+            recent = conn.execute(
+                "SELECT ts, client, route, model, status, ms FROM hits "
+                "ORDER BY ts DESC LIMIT 20",
+            ).fetchall()
+            conn.close()
+            routes = []
+            for r in self.server.cfg.get("routes", []):
+                routes.append({
+                    "prefix": r["prefix"], "name": r.get("name", "?"),
+                    "ready": (not r.get("api_key_env")) or bool(r.get("api_key")),
+                    "need": r.get("api_key_env"),
+                })
+            return self._json(200, {
+                "models": self._virtual_models(),
+                "routes": routes,
+                "usage_today": [{"client": c, "requests": n} for c, n in usage],
+                "recent": [{"at": t, "client": c, "route": ro, "model": m,
+                            "status": s, "ms": ms}
+                           for t, c, ro, m, s, ms in recent],
+            })
+        if self.path == "/ui" or self.path == "/ui/":
+            return self._html(200, UI_PAGE)
         return self._json(404, {"error": "not found"})
+
+    def _virtual_models(self):
+        data = []
+        for route in self.server.cfg.get("routes", []):
+            if route["prefix"] == "local/":
+                for m in self._ollama_models(route):
+                    data.append({"id": "local/" + m, "object": "model",
+                                 "owned_by": "ollama"})
+            else:
+                for m in route.get("models", []):
+                    data.append({"id": route["prefix"] + m, "object": "model",
+                                 "owned_by": route.get("name", "upstream")})
+        return data
 
     def _ollama_models(self, route):
         try:

@@ -1,0 +1,24 @@
+# All-local stack: gateway + dashboard. Ollama stays on the host
+# (already there); the gateway reaches it via host networking for LAN
+# use, or via host-gateway mapping (default below, localhost use).
+services:
+  gateway:
+    build: .
+    ports:
+      - "127.0.0.1:4143:4143"
+    environment:
+      GATEWAY_CONFIG: /config/config.json
+      GATEWAY_DB: /data/usage.db
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - ./config:/config:ro
+      - gwdata:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  gwdata:
